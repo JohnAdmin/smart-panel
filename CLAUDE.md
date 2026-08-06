@@ -5,11 +5,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Firmware for a WT32-SC01 Plus (ESP32-S3) smart-home touch panel: LVGL UI on a
 480×320 ST7796, MQTT device control, a web config portal, scenes and schedules.
 
-`README.md` is thorough and current — it owns the feature list, MQTT topic
-layout, REST API table, partition map, system limits and factory-reset
-procedure. Read it rather than re-deriving any of that. This file covers what
-the README does not: how to build here, and the cross-cutting rules that are
-easy to violate because they live in one file and bind everywhere else.
+`docs/` is thorough and current — it owns the feature list, MQTT topic layout,
+REST API table, partition map, system limits and factory-reset procedure.
+Consult it rather than re-deriving any of that. `README.md` is now just an
+overview plus a link table. This file covers what the docs do not: how to build
+here, and the cross-cutting rules that are easy to violate because they live in
+one file and bind everywhere else.
+
+## Reading the docs
+
+One file per topic, each 40–120 lines. **Read the one file you need — never the
+whole set**, unless the task genuinely spans most of it (a rewrite, an audit).
+
+| Need | File |
+| --- | --- |
+| Hardware, library versions, partition map, RGB565 colour rules | `docs/hardware.md` |
+| Feature list (devices, scenes, schedules, screensaver, weather, portal, OTA) | `docs/features.md` |
+| Dual-core split, data flow, storage, update frequencies, boot sequence, UI layer | `docs/architecture.md` |
+| **MQTT topic structure** + payload formats + Homebridge compat | `docs/mqtt.md` |
+| **Web API endpoint table**, editing the SPA | `docs/web-api.md` |
+| Source file map, translation workflow | `docs/source-map.md` |
+| System limits, default configuration | `docs/configuration.md` |
+| Troubleshooting, factory reset, serial debug, known limitations | `docs/troubleshooting.md` |
+| Stock ticker setup (diagnosis lives in the `stock-ticker` skill) | `docs/stock-ticker.md` |
+| Changelog | `docs/changelog.md` |
+
+Skip `docs/build.md` — this file supersedes it.
+
+`docs/architecture.md` and `docs/hardware.md` restate the threading and display
+rules below in prose; the authoritative short form is here. Keep both in sync
+when either changes, and update this table when a doc is added or renamed.
 
 ## Build & flash
 
