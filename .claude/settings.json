@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./src/lv_font_montserrat_*.c)",
+      "Read(./src/ui/lv_font_arial_120.c)",
+      "Read(./src/material_icons_font.c)",
+      "Read(./src/*.ttf)",
+      "Read(./fonts_src/**)",
+      "Read(./.pio/**)",
+      "Read(./build/**)",
+      "Read(./*.log)"
+    ]
+  }
+}
