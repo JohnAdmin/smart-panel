@@ -1,0 +1,113 @@
+{
+  "_type": "sc01_backup",
+  "_version": 1,
+  "_date": "2026-06-12T13:32:46.633Z",
+  "config": {
+    "wifi_ssid": "Hero 2g",
+    "wifi_pass": "********",
+    "mqtt_srv": "192.168.1.140",
+    "mqtt_port": 1883,
+    "mqtt_usr": "",
+    "mqtt_pwd": "********",
+    "weather_city": "Bangkok",
+    "panel_title": "Hero Home Panel",
+    "theme_dark": true,
+    "large_tiles": false,
+    "time_24h": true,
+    "brightness": 255,
+    "gmt_offset": 7,
+    "web_user": "admin",
+    "web_pass": "********",
+    "ss_timeout": 120,
+    "lang": "en",
+    "devices": [
+      {
+        "name": "ไฟโต๊ะทำงาน",
+        "room": "Desk",
+        "state_topic": "homebridge/desklight/stat",
+        "cmnd_topic": "homebridge/desklight/set",
+        "dimmer_topic": "",
+        "icon_type": 0,
+        "is_favorite": false
+      },
+      {
+        "name": "ไฟห้องครัว",
+        "room": "Kitchen",
+        "state_topic": "homebridge/kitchen/stat",
+        "cmnd_topic": "homebridge/kitchen/set",
+        "dimmer_topic": "",
+        "icon_type": 0,
+        "is_favorite": true
+      },
+      {
+        "name": "ไฟชั้น1",
+        "room": "Floor",
+        "state_topic": "homebridge/floor1/stat",
+        "cmnd_topic": "homebridge/floor1/stat",
+        "dimmer_topic": "",
+        "icon_type": 0,
+        "is_favorite": false
+      },
+      {
+        "name": "พัดลมเพดาน",
+        "room": "Ceiling",
+        "state_topic": "homebridge/ceilingfan/stat",
+        "cmnd_topic": "homebridge/ceilingfan/set",
+        "dimmer_topic": "",
+        "icon_type": 1,
+        "is_favorite": false
+      },
+      {
+        "name": "ไฟหน้าทีวี",
+        "room": "TV",
+        "state_topic": "homebridge/tvlight/stat",
+        "cmnd_topic": "homebridge/tvlight/set",
+        "dimmer_topic": "",
+        "icon_type": 0,
+        "is_favorite": true
+      },
+      {
+        "name": "ไฟห้องโถง",
+        "room": "Living",
+        "state_topic": "homebridge/livinglight/stat",
+        "cmnd_topic": "homebridge/livinglight/set",
+        "dimmer_topic": "",
+        "icon_type": 0,
+        "is_favorite": true
+      },
+      {
+        "name": "ไฟโต๊ะอาหาร",
+        "room": "Dining",
+        "state_topic": "homebridge/dininglight/stat",
+        "cmnd_topic": "homebridge/dininglight/set",
+        "dimmer_topic": "",
+        "icon_type": 0,
+        "is_favorite": true
+      },
+      {
+        "name": "Smart Panel",
+        "room": "Panel",
+        "state_topic": "sc01/status",
+        "cmnd_topic": "",
+        "dimmer_topic": "",
+        "icon_type": 6,
+        "is_favorite": false
+      },
+      {
+        "name": "Fan fresh air",
+        "room": "Living",
+        "state_topic": "homebridge/fanfreshair/stat",
+        "cmnd_topic": "homebridge/fanfreshair/set",
+        "dimmer_topic": "",
+        "icon_type": 1,
+        "is_favorite": false
+      }
+    ]
+  },
+  "scenes": {
+    "scenes": []
+  },
+  "schedules": {
+    "schedules": []
+  }
+}
