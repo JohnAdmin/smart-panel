@@ -119,8 +119,7 @@ void build_dimmer_modal(int device_index) {
   lv_obj_set_size(panel, UI_MODAL_W, UI_MODAL_H);
   lv_obj_center(panel);
   lv_obj_set_style_bg_color(panel, lv_color_hex(CLR_HEX_SURFACE_1), 0);
-  lv_obj_set_style_bg_grad_color(panel, lv_color_hex(CLR_HEX_SURFACE_0), 0);
-  lv_obj_set_style_bg_grad_dir(panel, LV_GRAD_DIR_VER, 0);
+  lv_obj_set_style_bg_grad_dir(panel, LV_GRAD_DIR_NONE, 0);
   lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
   lv_obj_set_style_border_color(panel, lv_color_hex(CLR_HEX_HAIRLINE), 0);
   lv_obj_set_style_border_width(panel, 1, 0);

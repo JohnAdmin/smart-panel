@@ -25,6 +25,11 @@ extern bool themeDark; // Pulls from globals.h without circular inclusion
        ? ((lv_color_t)LV_COLOR_MAKE(0xFF, 0xFF, 0xFF))                         \
        : ((lv_color_t)LV_COLOR_MAKE(0x11, 0x18, 0x27))) // White vs Near Black
 
+// DEPRECATED — nothing uses these two any more. Every surface they sat on
+// (frosted header, pill button, glass card) is dark in both themes, so the
+// theme-aware branch flipped the label to near black in light mode and left
+// dark text on a dark fill. Use CLR_HEX_TEXT_HI / _MID from ui_helpers.h.
+//
 // R and G held equal so the panel's weak blue channel can't leave a green
 // cast at low brightness — see the neutral ramp note in ui_helpers.h.
 #define CLR_TEXT_DIM                                                           \

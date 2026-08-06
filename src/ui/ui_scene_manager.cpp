@@ -211,7 +211,7 @@ void build_scene_list_screen() {
   // Title
   lv_obj_t *lbl_title = lv_label_create(hdr);
   lv_label_set_text(lbl_title, L(L_SCENES));
-  lv_obj_set_style_text_color(lbl_title, CLR_TEXT_TITLE, 0);
+  lv_obj_set_style_text_color(lbl_title, lv_color_hex(CLR_HEX_TEXT_HI), 0);
   lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_18, 0);
   lv_obj_align(lbl_title, LV_ALIGN_LEFT_MID, 62, 0);
 
@@ -227,7 +227,7 @@ void build_scene_list_screen() {
   lv_obj_set_style_pad_all(badge, 0, 0);
   lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
   scene_count_lbl = lv_label_create(badge);
-  lv_obj_set_style_text_color(scene_count_lbl, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(scene_count_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(scene_count_lbl, &lv_font_montserrat_12, 0);
   lv_obj_center(scene_count_lbl);
 
@@ -262,7 +262,7 @@ populate:
   if (sceneCount == 0) {
     lv_obj_t *empty = lv_label_create(scene_list_container);
     lv_label_set_text(empty, L(L_NO_SCENES));
-    lv_obj_set_style_text_color(empty, CLR_TEXT_DIM, 0);
+    lv_obj_set_style_text_color(empty, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(empty, LV_ALIGN_CENTER, 0, 40);
     return;
@@ -297,7 +297,7 @@ populate:
     // Name + action count
     lv_obj_t *nm = lv_label_create(row);
     lv_label_set_text(nm, scenes[i].name);
-    lv_obj_set_style_text_color(nm, CLR_TEXT_TITLE, 0);
+    lv_obj_set_style_text_color(nm, lv_color_hex(CLR_HEX_TEXT_HI), 0);
     lv_obj_set_style_text_font(nm, &lv_font_montserrat_14, 0);
     lv_obj_align(nm, LV_ALIGN_LEFT_MID, 52, -8);
 
@@ -305,13 +305,13 @@ populate:
     snprintf(info, sizeof(info), "%d %s", scenes[i].action_count, L(L_ACTIONS));
     lv_obj_t *sub = lv_label_create(row);
     lv_label_set_text(sub, info);
-    lv_obj_set_style_text_color(sub, CLR_TEXT_DIM, 0);
+    lv_obj_set_style_text_color(sub, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_obj_set_style_text_font(sub, &lv_font_montserrat_12, 0);
     lv_obj_align(sub, LV_ALIGN_LEFT_MID, 52, 10);
 
     // Edit
     lv_obj_t *btn_edit = ui_create_pill_btn(row, 48, UI_PILL_BTN_H,
-                                            LV_SYMBOL_EDIT, CLR_TEXT_DIM,
+                                            LV_SYMBOL_EDIT, lv_color_hex(CLR_HEX_TEXT_MID),
                                             btn_edit_scene_cb,
                                             (void *)(ptrdiff_t)i,
                                             LV_EVENT_CLICKED);
@@ -362,7 +362,7 @@ void build_edit_scene_screen(int index) {
   // Title
   lv_obj_t *lt = lv_label_create(hdr);
   lv_label_set_text(lt, index >= 0 ? L(L_EDIT_SCENE) : L(L_NEW_SCENE));
-  lv_obj_set_style_text_color(lt, CLR_TEXT_TITLE, 0);
+  lv_obj_set_style_text_color(lt, lv_color_hex(CLR_HEX_TEXT_HI), 0);
   lv_obj_set_style_text_font(lt, &lv_font_montserrat_18, 0);
   lv_obj_align(lt, LV_ALIGN_LEFT_MID, 62, 0);
 
@@ -391,7 +391,7 @@ void build_edit_scene_screen(int index) {
   auto mk_label = [&](lv_obj_t *parent, const char *text) {
     lv_obj_t *l = lv_label_create(parent);
     lv_label_set_text(l, text);
-    lv_obj_set_style_text_color(l, CLR_TEXT_DIM, 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
   };
 
@@ -440,7 +440,7 @@ void build_edit_scene_screen(int index) {
 
   // + Add Action button
   if (visible_action_count < MAX_SCENE_ACTIONS) {
-    lv_obj_t *btn_more = ui_create_pill_btn(form, 120, 32, "", CLR_TEXT_DIM,
+    lv_obj_t *btn_more = ui_create_pill_btn(form, 120, 32, "", lv_color_hex(CLR_HEX_TEXT_MID),
                                             btn_add_action_cb);
     lv_obj_t *lm = lv_obj_get_child(btn_more, 0);
     lv_label_set_text_fmt(lm, LV_SYMBOL_PLUS " %s", L(L_ACTION));
@@ -487,8 +487,7 @@ void create_scene_tiles(lv_obj_t *parent) {
     lv_obj_clear_flag(card,
                       LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS);
     lv_obj_set_style_bg_color(card, lv_color_hex(CLR_HEX_SURFACE_1), 0);
-    lv_obj_set_style_bg_grad_color(card, lv_color_hex(CLR_HEX_SURFACE_0), 0);
-    lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_NONE, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_90, 0);
     lv_obj_set_style_border_color(card, lv_color_hex(CLR_HEX_HAIRLINE), 0);
     lv_obj_set_style_border_opa(card, LV_OPA_COVER, 0);
@@ -524,7 +523,8 @@ void create_scene_tiles(lv_obj_t *parent) {
                            ((sc_rgb >> 8) & 0xFF) * 587 +
                            (sc_rgb & 0xFF) * 114) / 1000;
     lv_obj_set_style_text_color(
-        ico, luma > 140 ? lv_color_hex(CLR_HEX_ON_ACCENT) : lv_color_white(), 0);
+        ico, luma > 140 ? lv_color_hex(CLR_HEX_ON_ACCENT)
+                 : lv_color_hex(CLR_HEX_TEXT_HI), 0);
     lv_obj_center(ico);
     lv_obj_add_flag(ico, LV_OBJ_FLAG_EVENT_BUBBLE);
 

@@ -96,7 +96,7 @@ void ui_init() {
   lv_obj_set_style_bg_opa(ui_ScreenMain, LV_OPA_COVER, 0);
 
   // Use palette macros — Q4: avoid raw hex in ui.cpp
-  lv_color_t text_dim = CLR_TEXT_DIM;
+  lv_color_t text_dim = lv_color_hex(CLR_HEX_TEXT_MID);
   // Load wallpaper from LittleFS (decoded JPEG placed as background)
   // Must be called BEFORE header and tiles so it sits behind them.
   ui_wallpaper_load(ui_ScreenMain);
@@ -224,9 +224,12 @@ void ui_init() {
                                            btn_back_to_main_cb);
   lv_obj_align(btn_back, LV_ALIGN_LEFT_MID, 8, 0);
 
-  // Devices button — pill
+  // Devices button — pill.
+  // Label colour comes from the token ramp, not CLR_TEXT_TITLE: the pill fill
+  // is CLR_HEX_PILL_BG in both themes, so a theme-aware label flipped to near
+  // black in light mode and left dark text on a dark pill. Same below.
   lv_obj_t *btn_dev = ui_create_pill_btn(shdr, 90, UI_PILL_BTN_H,
-                                          "", CLR_TEXT_TITLE,
+                                          "", lv_color_hex(CLR_HEX_TEXT_HI),
                                           btn_goto_devices_cb);
   s_lbl_btn_dev = lv_obj_get_child(btn_dev, 0);
   lv_label_set_text_fmt(s_lbl_btn_dev, LV_SYMBOL_LIST " %s", L(L_DEVICES));
@@ -235,7 +238,7 @@ void ui_init() {
 
   // Scenes button — pill
   lv_obj_t *btn_scenes = ui_create_pill_btn(shdr, 80, UI_PILL_BTN_H,
-                                             "", CLR_TEXT_TITLE,
+                                             "", lv_color_hex(CLR_HEX_TEXT_HI),
                                              [](lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
       build_scene_list_screen();
@@ -250,7 +253,7 @@ void ui_init() {
 
   // Schedules button — pill
   lv_obj_t *btn_sched = ui_create_pill_btn(shdr, 90, UI_PILL_BTN_H,
-                                            "", CLR_TEXT_TITLE,
+                                            "", lv_color_hex(CLR_HEX_TEXT_HI),
                                             [](lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
       build_schedule_list_screen();

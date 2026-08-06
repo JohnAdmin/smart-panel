@@ -96,10 +96,11 @@ lv_obj_t *create_flip_flap(lv_obj_t *parent, int x_offset) {
   lv_obj_set_size(flap, SS_FLAP_W, SS_FLAP_H);
   lv_obj_align(flap, LV_ALIGN_CENTER, x_offset, SS_CLOCK_Y);
 
-  // Machined slab: light at the top, falling away toward the base
+  // Machined slab, flat fill. The old top-to-base gradient banded into coloured
+  // seams on this RGB565 panel — see the note in ui_helpers.h. The seam strip
+  // below still gives the flap its fold.
   lv_obj_set_style_bg_color(flap, lv_color_hex(0x1A2029), 0);
-  lv_obj_set_style_bg_grad_color(flap, lv_color_hex(CLR_HEX_SURFACE_0), 0);
-  lv_obj_set_style_bg_grad_dir(flap, LV_GRAD_DIR_VER, 0);
+  lv_obj_set_style_bg_grad_dir(flap, LV_GRAD_DIR_NONE, 0);
   lv_obj_set_style_bg_opa(flap, LV_OPA_COVER, 0);
 
   // Hairline edge only — no coloured frame
