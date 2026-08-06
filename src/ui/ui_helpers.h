@@ -83,7 +83,12 @@
 // moved up in step — the ramp is now spaced 42 / 50 instead of 54 / 70.
 // The tab bar only reaches AA because its scrim was taken to 90 %; at the old
 // 70 % no text colour in this ramp could pass there (see rebuild_grid()).
-#define CLR_HEX_TEXT_HI        0xF8F8FC  // primary
+//
+// TEXT_HI came off pure white — 0xF8F8FC quantises to (255,250,255) and glared
+// against these dark surfaces. It is set so the two steps of the ramp are even
+// in luminance (0.225 HI→MID against 0.229 MID→LOW), which is what keeps three
+// weights readable as three; it still clears AAA at 10.06:1 on a card.
+#define CLR_HEX_TEXT_HI        0xE4E4EC  // primary
 #define CLR_HEX_TEXT_MID       0xC6C6D0  // secondary
 #define CLR_HEX_TEXT_LOW       0x9C9CA8  // tertiary / inactive
 

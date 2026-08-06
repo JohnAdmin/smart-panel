@@ -139,7 +139,9 @@ void build_settings_screen() {
   lv_obj_set_style_bg_color(tab_btns, lv_color_hex(CLR_HEX_PILL_BG), 0);
   lv_obj_set_style_bg_opa(tab_btns, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(tab_btns, 12, 0);
-  lv_obj_set_style_text_color(tab_btns, CLR_TEXT_DIM, 0);
+  // Token ramp, not CLR_TEXT_DIM — the bar's fill is CLR_HEX_PILL_BG in both
+  // themes, so the theme-aware grey went unreadable against it in light mode.
+  lv_obj_set_style_text_color(tab_btns, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(tab_btns, &lv_font_montserrat_14, 0);
   lv_obj_set_style_border_side(tab_btns, LV_BORDER_SIDE_NONE, LV_PART_ITEMS);
   lv_style_selector_t checked = (lv_style_selector_t)LV_PART_ITEMS |
@@ -184,7 +186,7 @@ void build_settings_screen() {
     // Info — right side
     lv_obj_t *lbl_scan = lv_label_create(qr_card);
     lv_label_set_text(lbl_scan, L(L_SCAN_QR));
-    lv_obj_set_style_text_color(lbl_scan, CLR_TEXT_TITLE, 0);
+    lv_obj_set_style_text_color(lbl_scan, lv_color_hex(CLR_HEX_TEXT_HI), 0);
     lv_obj_set_style_text_font(lbl_scan, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_align(lbl_scan, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lbl_scan, LV_ALIGN_RIGHT_MID, -70, -30);
@@ -199,13 +201,19 @@ void build_settings_screen() {
     lv_obj_set_style_shadow_color(dot, lv_color_hex(CLR_HEX_OK), 0);
     lv_obj_set_style_shadow_width(dot, 8, 0);
     lv_obj_set_style_shadow_opa(dot, LV_OPA_60, 0);
-    lv_obj_align(dot, LV_ALIGN_RIGHT_MID, -152, 18);
 
     lv_obj_t *lbl_status = lv_label_create(qr_card);
     lv_label_set_text(lbl_status, L(L_CONNECTED));
     lv_obj_set_style_text_color(lbl_status, lv_color_hex(CLR_HEX_OK), 0);
     lv_obj_set_style_text_font(lbl_status, &lv_font_montserrat_12, 0);
     lv_obj_align(lbl_status, LV_ALIGN_RIGHT_MID, -88, 18);
+
+    // Anchor the dot to the label instead of giving it its own right-aligned
+    // offset. Both were pinned to the card's right edge, so the gap between
+    // them was whatever the translated string left over — "Connected" is wide
+    // enough to close it to a pixel, and a longer word would overlap the dot.
+    lv_obj_update_layout(qr_card);
+    lv_obj_align_to(dot, lbl_status, LV_ALIGN_OUT_LEFT_MID, -8, 0);
 
     // IP address — amber accent
     lv_obj_t *lbl_ip = lv_label_create(qr_card);
@@ -241,7 +249,7 @@ void build_settings_screen() {
 
     lv_obj_t *lbl_msg = lv_label_create(dc_card);
     lv_label_set_text(lbl_msg, L(L_WIFI_NOT_CONNECTED));
-    lv_obj_set_style_text_color(lbl_msg, CLR_TEXT_DIM, 0);
+    lv_obj_set_style_text_color(lbl_msg, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_obj_set_style_text_align(lbl_msg, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lbl_msg, LV_ALIGN_CENTER, 0, -8);
 
@@ -276,7 +284,7 @@ void build_settings_screen() {
   // Brightness
   lv_obj_t *br_label = lv_label_create(card_disp);
   lv_label_set_text(br_label, L(L_BRIGHTNESS));
-  lv_obj_set_style_text_color(br_label, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(br_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(br_label, &lv_font_montserrat_12, 0);
   lv_obj_align(br_label, LV_ALIGN_TOP_LEFT, 2, 0);
 
@@ -291,7 +299,7 @@ void build_settings_screen() {
   // Time Format
   lv_obj_t *tf_label = lv_label_create(card_disp);
   lv_label_set_text(tf_label, L(L_TIME_FORMAT));
-  lv_obj_set_style_text_color(tf_label, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(tf_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(tf_label, &lv_font_montserrat_12, 0);
   lv_obj_align(tf_label, LV_ALIGN_TOP_MID, 0, 0);
 
@@ -319,7 +327,7 @@ void build_settings_screen() {
   // Screensaver Style
   lv_obj_t *ss_label = lv_label_create(card_disp);
   lv_label_set_text(ss_label, L(L_SCREENSAVER));
-  lv_obj_set_style_text_color(ss_label, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(ss_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(ss_label, &lv_font_montserrat_12, 0);
   lv_obj_align(ss_label, LV_ALIGN_TOP_RIGHT, -4, 0);
 
@@ -352,7 +360,7 @@ void build_settings_screen() {
   // Timeout
   lv_obj_t *to_label = lv_label_create(card_sys);
   lv_label_set_text(to_label, L(L_SCREEN_TIMEOUT));
-  lv_obj_set_style_text_color(to_label, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(to_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(to_label, &lv_font_montserrat_12, 0);
   lv_obj_align(to_label, LV_ALIGN_TOP_LEFT, 2, 0);
 
@@ -395,7 +403,7 @@ void build_settings_screen() {
   // Language dropdown — center of system card
   lv_obj_t *lang_label = lv_label_create(card_sys);
   lv_label_set_text(lang_label, L(L_LANGUAGE));
-  lv_obj_set_style_text_color(lang_label, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(lang_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(lang_label, &lv_font_montserrat_12, 0);
   lv_obj_align(lang_label, LV_ALIGN_TOP_MID, 0, 0);
 
@@ -457,7 +465,7 @@ void build_settings_screen() {
   // Haptic switch — above reset button
   lv_obj_t *haptic_label = lv_label_create(card_sys);
   lv_label_set_text(haptic_label, L(L_HAPTIC));
-  lv_obj_set_style_text_color(haptic_label, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(haptic_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(haptic_label, &lv_font_montserrat_12, 0);
   lv_obj_align(haptic_label, LV_ALIGN_RIGHT_MID, -100, -20);
 
@@ -501,7 +509,7 @@ void build_settings_screen() {
   // Layout style dropdown — left
   lv_obj_t *lay_label = lv_label_create(card_appr);
   lv_label_set_text(lay_label, "Home Layout");
-  lv_obj_set_style_text_color(lay_label, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(lay_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(lay_label, &lv_font_montserrat_12, 0);
   lv_obj_align(lay_label, LV_ALIGN_TOP_LEFT, 2, 0);
 
@@ -529,7 +537,7 @@ void build_settings_screen() {
   // Wallpaper presets — right
   lv_obj_t *wp_label = lv_label_create(card_appr);
   lv_label_set_text(wp_label, "Wallpaper");
-  lv_obj_set_style_text_color(wp_label, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(wp_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(wp_label, &lv_font_montserrat_12, 0);
   lv_obj_align(wp_label, LV_ALIGN_TOP_LEFT, 150, 0);
 
@@ -562,7 +570,7 @@ void build_settings_screen() {
       lv_obj_t *bl = lv_label_create(frame);
       lv_label_set_text(bl, i == 3 ? LV_SYMBOL_TRASH : (i == 0 ? "1" : i == 1 ? "2" : "3"));
       lv_obj_set_style_text_color(bl,
-          i == 3 ? lv_color_hex(CLR_HEX_DANGER) : CLR_TEXT_TITLE, 0);
+          i == 3 ? lv_color_hex(CLR_HEX_DANGER) : lv_color_hex(CLR_HEX_TEXT_HI), 0);
       lv_obj_set_style_text_font(bl, &lv_font_montserrat_16, 0);
       lv_obj_center(bl);
       lv_obj_add_flag(bl, LV_OBJ_FLAG_EVENT_BUBBLE);

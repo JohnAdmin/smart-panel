@@ -190,7 +190,7 @@ void build_device_list_screen() {
   // Title
   lv_obj_t *lbl_title = lv_label_create(hdr);
   lv_label_set_text(lbl_title, L(L_DEVICES));
-  lv_obj_set_style_text_color(lbl_title, CLR_TEXT_TITLE, 0);
+  lv_obj_set_style_text_color(lbl_title, lv_color_hex(CLR_HEX_TEXT_HI), 0);
   lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_18, 0);
   lv_obj_align(lbl_title, LV_ALIGN_LEFT_MID, 62, 0);
 
@@ -209,7 +209,7 @@ void build_device_list_screen() {
   lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
   dev_count_lbl = lv_label_create(badge);
   lv_label_set_text(dev_count_lbl, cnt);
-  lv_obj_set_style_text_color(dev_count_lbl, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(dev_count_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(dev_count_lbl, &lv_font_montserrat_12, 0);
   lv_obj_center(dev_count_lbl);
 
@@ -261,7 +261,7 @@ populate:
     // Name
     lv_obj_t *nm = lv_label_create(row);
     lv_label_set_text(nm, devices[i].name);
-    lv_obj_set_style_text_color(nm, CLR_TEXT_TITLE, 0);
+    lv_obj_set_style_text_color(nm, lv_color_hex(CLR_HEX_TEXT_HI), 0);
     lv_obj_set_style_text_font(nm, &lv_font_montserrat_14, 0);
     lv_obj_set_width(nm, 220);
     lv_label_set_long_mode(nm, LV_LABEL_LONG_DOT);
@@ -269,7 +269,7 @@ populate:
 
     // Edit — dark pill
     lv_obj_t *btn_edit = ui_create_pill_btn(row, 48, UI_PILL_BTN_H,
-                                            LV_SYMBOL_EDIT, CLR_TEXT_DIM,
+                                            LV_SYMBOL_EDIT, lv_color_hex(CLR_HEX_TEXT_MID),
                                             btn_edit_device_cb,
                                             (void *)(ptrdiff_t)i,
                                             LV_EVENT_CLICKED);
@@ -307,7 +307,7 @@ void build_edit_device_screen() {
   // Title
   lv_obj_t *lt = lv_label_create(hdr);
   lv_label_set_text(lt, editDeviceIndex >= 0 ? L(L_EDIT_DEVICE) : L(L_NEW_DEVICE));
-  lv_obj_set_style_text_color(lt, CLR_TEXT_TITLE, 0);
+  lv_obj_set_style_text_color(lt, lv_color_hex(CLR_HEX_TEXT_HI), 0);
   lv_obj_set_style_text_font(lt, &lv_font_montserrat_18, 0);
   lv_obj_align(lt, LV_ALIGN_LEFT_MID, 62, 0);
 
@@ -338,7 +338,7 @@ void build_edit_device_screen() {
   // Device Name
   lv_obj_t *l1 = lv_label_create(form);
   lv_label_set_text(l1, L(L_DEVICE_NAME));
-  lv_obj_set_style_text_color(l1, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(l1, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(l1, &lv_font_montserrat_12, 0);
   ta_dev_name = ui_create_form_textarea(form, 40, L(L_DEVICE_NAME_HINT),
                                      ta_event_cb, (void *)kb_edit);
@@ -346,7 +346,7 @@ void build_edit_device_screen() {
   // State Topic
   lv_obj_t *l2 = lv_label_create(form);
   lv_label_set_text(l2, L(L_STATE_TOPIC));
-  lv_obj_set_style_text_color(l2, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(l2, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(l2, &lv_font_montserrat_12, 0);
   ta_dev_stat = ui_create_form_textarea(form, 40, "homebridge/name/stat",
                                      ta_event_cb, (void *)kb_edit);
@@ -354,7 +354,7 @@ void build_edit_device_screen() {
   // Command Topic
   lv_obj_t *l3 = lv_label_create(form);
   lv_label_set_text(l3, L(L_CMD_TOPIC));
-  lv_obj_set_style_text_color(l3, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(l3, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(l3, &lv_font_montserrat_12, 0);
   ta_dev_cmnd = ui_create_form_textarea(form, 40, "homebridge/name/set",
                                      ta_event_cb, (void *)kb_edit);
@@ -362,7 +362,7 @@ void build_edit_device_screen() {
   // Dimmer Topic
   lv_obj_t *l3b = lv_label_create(form);
   lv_label_set_text(l3b, L(L_DIMMER_TOPIC));
-  lv_obj_set_style_text_color(l3b, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(l3b, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(l3b, &lv_font_montserrat_12, 0);
   ta_dev_dimmer = ui_create_form_textarea(form, 40, "homebridge/name/dimmer",
                                      ta_event_cb, (void *)kb_edit);
@@ -370,7 +370,7 @@ void build_edit_device_screen() {
   // Icon Type
   lv_obj_t *l4 = lv_label_create(form);
   lv_label_set_text(l4, L(L_ICON_TYPE));
-  lv_obj_set_style_text_color(l4, CLR_TEXT_DIM, 0);
+  lv_obj_set_style_text_color(l4, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_set_style_text_font(l4, &lv_font_montserrat_12, 0);
   dd_icon = lv_dropdown_create(form);
   lv_dropdown_set_options(dd_icon, icon_names);

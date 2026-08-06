@@ -454,7 +454,7 @@ void rebuild_grid() {
   if (deviceCount == 0) {
     lv_obj_t *empty_lbl = lv_label_create(main_body_container);
     lv_label_set_text(empty_lbl, L(L_NO_DEVICES));
-    lv_obj_set_style_text_color(empty_lbl, CLR_TEXT_DIM, 0);
+    lv_obj_set_style_text_color(empty_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_obj_set_style_text_font(empty_lbl, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_align(empty_lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(empty_lbl);

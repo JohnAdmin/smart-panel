@@ -94,7 +94,7 @@ void build_schedule_list_screen() {
 
   lv_obj_t *title = lv_label_create(header);
   lv_label_set_text_fmt(title, LV_SYMBOL_LOOP " %s", L(L_SCHEDULES));
-  lv_obj_set_style_text_color(title, CLR_TEXT_TITLE, 0);
+  lv_obj_set_style_text_color(title, lv_color_hex(CLR_HEX_TEXT_HI), 0);
   lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
   lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
 
@@ -114,7 +114,7 @@ populate:
   if (scheduleCount == 0) {
     lv_obj_t *empty = lv_label_create(sched_list_container);
     lv_label_set_text(empty, L(L_NO_SCHEDULES));
-    lv_obj_set_style_text_color(empty, CLR_TEXT_DIM, 0);
+    lv_obj_set_style_text_color(empty, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(empty, 460);
@@ -149,7 +149,7 @@ populate:
     lv_obj_t *scene_lbl = lv_label_create(card);
     lv_label_set_text(scene_lbl, scene_name);
     lv_obj_set_style_text_font(scene_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(scene_lbl, CLR_TEXT_DIM, 0);
+    lv_obj_set_style_text_color(scene_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_obj_align(scene_lbl, LV_ALIGN_LEFT_MID, 0, 14);
 
     // Days text
@@ -165,7 +165,7 @@ populate:
     lv_obj_t *days_lbl = lv_label_create(card);
     lv_label_set_text(days_lbl, days_buf);
     lv_obj_set_style_text_font(days_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(days_lbl, CLR_TEXT_DIM, 0);
+    lv_obj_set_style_text_color(days_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_obj_align(days_lbl, LV_ALIGN_CENTER, 20, -8);
 
     // Enable/Disable switch
