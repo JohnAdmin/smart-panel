@@ -300,13 +300,15 @@ static lv_obj_t *create_device_tile(lv_obj_t *parent, int idx, int tile_w,
   lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_flag(tile, LV_OBJ_FLAG_PRESS_LOCK);
 
-  // Resting surface: soft vertical gradient + hairline outline. The gradient
-  // is what keeps the tile from looking like a flat rectangle pasted on the
-  // wallpaper; opacity stays high so text is legible over any background.
+  // Resting surface: flat fill at 90 %, hairline outline, drop shadow. The
+  // depth comes from the wallpaper reading through the fill, not from a
+  // gradient — a synthetic ramp collapses to four hue steps here (see the
+  // banding note in ui_helpers.h) whereas the wallpaper is continuous tone and
+  // stays smooth. 90 % is the point where that still reads without letting a
+  // bright image wash the labels out.
   lv_obj_set_style_bg_color(tile, lv_color_hex(CLR_HEX_SURFACE_1), 0);
-  lv_obj_set_style_bg_grad_color(tile, lv_color_hex(CLR_HEX_SURFACE_0), 0);
-  lv_obj_set_style_bg_grad_dir(tile, LV_GRAD_DIR_VER, 0);
-  lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_grad_dir(tile, LV_GRAD_DIR_NONE, 0);
+  lv_obj_set_style_bg_opa(tile, LV_OPA_90, 0);
   lv_obj_set_style_border_color(tile, lv_color_hex(CLR_HEX_HAIRLINE), 0);
   lv_obj_set_style_border_opa(tile, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(tile, 1, 0);
@@ -525,8 +527,11 @@ void rebuild_grid() {
   // The stock theme paints a filled block behind the selected tab, which fights
   // the tiles for attention — replaced here with a 3 px indicator rule.
   lv_obj_t *tab_btns = lv_tabview_get_tab_btns(room_tabview);
+  // Scrim at 90 %, matching the cards. At the old 70 % a bright wallpaper lifted
+  // the strip to (65,80,90), which put the inactive tab labels at 2.0:1 — and no
+  // colour in the text ramp could rescue them without becoming TEXT_MID.
   lv_obj_set_style_bg_color(tab_btns, lv_color_hex(CLR_HEX_SURFACE_0), 0);
-  lv_obj_set_style_bg_opa(tab_btns, LV_OPA_70, 0);
+  lv_obj_set_style_bg_opa(tab_btns, LV_OPA_90, 0);
   lv_obj_set_style_border_color(tab_btns, lv_color_hex(CLR_HEX_HAIRLINE), 0);
   lv_obj_set_style_border_opa(tab_btns, LV_OPA_50, 0);
   lv_obj_set_style_border_width(tab_btns, 1, 0);
@@ -586,10 +591,15 @@ void rebuild_grid() {
   lv_obj_t *weather_card = lv_obj_create(home_tab);
   lv_obj_set_size(weather_card, UI_WEATHER_CARD_W, LV_PCT(100) - 8);
   lv_obj_align(weather_card, LV_ALIGN_LEFT_MID, 10, 0);
+  // Same 90 % flat fill as the tiles it sits beside — at cover it was the one
+  // opaque surface on the home tab and read as a slab next to them. The card
+  // carries the smallest type on the screen (TEXT_LOW at 12 px), so the cost
+  // was measured: against the shipped wallpaper the fill only ever darkens,
+  // leaving that text at 3.95:1 either way. A bright wallpaper takes it to
+  // ~3.1:1 — the same exposure the tiles' On/Off labels already run with.
   lv_obj_set_style_bg_color(weather_card, lv_color_hex(CLR_HEX_SURFACE_1), 0);
-  lv_obj_set_style_bg_grad_color(weather_card, lv_color_hex(CLR_HEX_SURFACE_0), 0);
-  lv_obj_set_style_bg_grad_dir(weather_card, LV_GRAD_DIR_VER, 0);
-  lv_obj_set_style_bg_opa(weather_card, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_grad_dir(weather_card, LV_GRAD_DIR_NONE, 0);
+  lv_obj_set_style_bg_opa(weather_card, LV_OPA_90, 0);
   lv_obj_set_style_radius(weather_card, 20, 0);
   lv_obj_set_style_border_width(weather_card, 1, 0);
   lv_obj_set_style_border_color(weather_card, lv_color_hex(CLR_HEX_HAIRLINE), 0);
@@ -885,7 +895,6 @@ void ui_update_device_status(int index, bool state) {
 #if UI_TILE_ON_STYLE == 0
   // Luminous: amber-tinted dark fill, amber badge, dark glyph on the badge.
   const lv_color_t bg_on      = lv_color_hex(CLR_HEX_ACCENT_TINT);
-  const lv_color_t bg_on_grad = lv_color_hex(CLR_HEX_ACCENT_TINT_LO);
   const lv_color_t ic_bg_on   = lv_color_hex(CLR_HEX_ACCENT);
   const lv_color_t txt_on     = lv_color_hex(CLR_HEX_TEXT_HI);
   const lv_color_t ico_on     = lv_color_hex(CLR_HEX_ON_ACCENT);
@@ -894,7 +903,6 @@ void ui_update_device_status(int index, bool state) {
 #else
   // Illuminated card: white fill with dark text (Apple-Home look).
   const lv_color_t bg_on      = lv_color_hex(0xFFFFFF);
-  const lv_color_t bg_on_grad = lv_color_hex(0xE9EDF3);
   const lv_color_t ic_bg_on   = lv_color_hex(CLR_HEX_ACCENT);
   const lv_color_t txt_on     = lv_color_hex(0x111827);
   const lv_color_t ico_on     = lv_color_hex(0xFFFFFF);
@@ -902,19 +910,20 @@ void ui_update_device_status(int index, bool state) {
   const lv_opa_t   bg_on_opa  = LV_OPA_COVER;
 #endif
 
-  // OFF State — resting glass surface
+  // OFF State — resting surface
   const lv_color_t bg_off      = lv_color_hex(CLR_HEX_SURFACE_1);
-  const lv_color_t bg_off_grad = lv_color_hex(CLR_HEX_SURFACE_0);
   const lv_color_t ic_bg_off   = lv_color_hex(CLR_HEX_SURFACE_2);
   const lv_color_t txt_off     = lv_color_hex(CLR_HEX_TEXT_HI);
   const lv_color_t sub_off     = lv_color_hex(CLR_HEX_TEXT_LOW);
   const lv_color_t ico_off     = lv_color_hex(CLR_HEX_TEXT_MID);
 
-  // 1. Tile surface
+  // 1. Tile surface. Flat fill in both states — the RGB565 panel renders a
+  // shallow gradient as a handful of single-channel steps (green and purple
+  // seams, see ui_helpers.h). OFF stays at 90 % so the wallpaper gives the
+  // resting tile its depth; ON goes solid, which is part of what makes a lit
+  // device read as lit.
   lv_obj_set_style_bg_color(device_tiles[index], state ? bg_on : bg_off, 0);
-  lv_obj_set_style_bg_grad_color(device_tiles[index],
-                                 state ? bg_on_grad : bg_off_grad, 0);
-  lv_obj_set_style_bg_grad_dir(device_tiles[index], LV_GRAD_DIR_VER, 0);
+  lv_obj_set_style_bg_grad_dir(device_tiles[index], LV_GRAD_DIR_NONE, 0);
   lv_obj_set_style_bg_opa(device_tiles[index], state ? bg_on_opa : LV_OPA_90, 0);
   lv_obj_set_style_border_width(device_tiles[index], 1, 0);
   lv_obj_set_style_border_color(device_tiles[index],
@@ -986,9 +995,7 @@ void ui_update_device_status(int index, bool state) {
   // --- Update Favorite tile mirror (Home tab) ---
   if (fav_tiles[index] != NULL) {
     lv_obj_set_style_bg_color(fav_tiles[index], state ? bg_on : bg_off, 0);
-    lv_obj_set_style_bg_grad_color(fav_tiles[index],
-                                   state ? bg_on_grad : bg_off_grad, 0);
-    lv_obj_set_style_bg_grad_dir(fav_tiles[index], LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_grad_dir(fav_tiles[index], LV_GRAD_DIR_NONE, 0);
     lv_obj_set_style_bg_opa(fav_tiles[index], state ? bg_on_opa : LV_OPA_90, 0);
     lv_obj_set_style_border_width(fav_tiles[index], 1, 0);
     lv_obj_set_style_border_color(fav_tiles[index],

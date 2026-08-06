@@ -47,21 +47,50 @@
 //
 // If a trace of green still shows on your unit, subtract 2–3 from the middle
 // (G) byte of these four values — that is the only knob that matters.
+//
+// Banding: do NOT put a vertical gradient between these steps. On this RGB565
+// panel a SURFACE_1 → SURFACE_0 ramp over a ~150 px tile quantises to only four
+// distinct colours, and each transition moves a single channel:
+//     y=0 (3,7,4)  y=59 (3,6,4)  y=99 (3,6,3)  y=119 (2,5,3)
+// The G-only step reads as a green seam and the B-only step as a purple one —
+// visible hue lines across every card, not a smooth ramp.
+//
+// The two obvious escapes were both measured and both fail:
+//   • Retuning the endpoints does nothing. LVGL stores bg_color/bg_grad_color
+//     as lv_color_t and interpolates from there (lv_gradient_calculate), so the
+//     stops are quantised before the ramp is built — there is no value between
+//     (4,8,5) and (3,7,4) to aim at.
+//   • LV_DITHER_GRADIENT is worse. lv_dither_ordered_ver adds a fixed ±32 to
+//     every channel, which is wider than this whole ramp (Δ≈10), so the tile
+//     turns to grain instead of banding.
+// Surfaces are therefore flat, and the depth on tiles comes from bg_opa < 100 %
+// letting the wallpaper through: it is continuous tone, so it stays smooth
+// where a synthetic ramp cannot.
 #define CLR_HEX_SURFACE_0      0x16161C  // app scrim: header, tab bar
 #define CLR_HEX_SURFACE_1      0x202028  // resting card / tile
 #define CLR_HEX_SURFACE_2      0x2C2C36  // raised element: icon badge, chip, input
 #define CLR_HEX_HAIRLINE       0x3E3E4A  // 1 px separators and tile outlines
 
 // ── Text ramp (same R = G rule) ─────────────────────────
+// TEXT_LOW sets the floor: it carries 12 px labels (tile On/Off, weather city,
+// "n of n on", inactive tabs) so it has to clear WCAG AA 4.5:1 against the
+// lightest background any of them can land on. Measured worst cases, across
+// all four shipped wallpapers:
+//     tile/card @90 %  4.66:1     chip SURFACE_2  5.23:1
+//     tab bar   @90 %  5.59:1     modal / flap    6.0:1+
+// The old 0x7C7C88 failed every one of them (2.0–4.0:1). Raising it closed the
+// gap to TEXT_MID to ~22 levels, which flattened the hierarchy, so TEXT_MID
+// moved up in step — the ramp is now spaced 42 / 50 instead of 54 / 70.
+// The tab bar only reaches AA because its scrim was taken to 90 %; at the old
+// 70 % no text colour in this ramp could pass there (see rebuild_grid()).
 #define CLR_HEX_TEXT_HI        0xF8F8FC  // primary
-#define CLR_HEX_TEXT_MID       0xB2B2BC  // secondary
-#define CLR_HEX_TEXT_LOW       0x7C7C88  // tertiary / inactive
+#define CLR_HEX_TEXT_MID       0xC6C6D0  // secondary
+#define CLR_HEX_TEXT_LOW       0x9C9CA8  // tertiary / inactive
 
 // ── Accent + semantics ──────────────────────────────────
 #define CLR_HEX_ACCENT         0xF59E0B  // amber — the single accent
 #define CLR_HEX_ACCENT_HI      0xFBBF24  // amber, lifted (text on dark tint)
-#define CLR_HEX_ACCENT_TINT    0x2C2008  // amber @ ~12 % — ON-tile fill (top)
-#define CLR_HEX_ACCENT_TINT_LO 0x1A1305  // ON-tile fill (bottom of gradient)
+#define CLR_HEX_ACCENT_TINT    0x2C2008  // amber @ ~12 % — flat ON-tile fill
 #define CLR_HEX_OK             0x34D399  // connected / active
 #define CLR_HEX_DANGER         0xEF4444  // destructive actions (delete, all-off)
 #define CLR_HEX_DANGER_HI      0xFCA5A5  // danger text on a dark red tint
@@ -149,14 +178,17 @@ static inline lv_obj_t *ui_create_accent_btn(lv_obj_t *parent, int w, int h,
 }
 
 // ── Surface ─────────────────────────────────────────────
-// The one raised-panel look used by tiles, cards and list rows: a soft
-// vertical gradient, a hairline outline and a neutral drop shadow. Opacity is
-// high enough that a bright wallpaper can't wash the content out — at 80 % the
-// settings forms turned the colour of whatever image was behind them.
+// The one raised-panel look used by tiles, cards and list rows: a flat fill, a
+// hairline outline and a neutral drop shadow. Opacity is high enough that a
+// bright wallpaper can't wash the content out — at 80 % the settings forms
+// turned the colour of whatever image was behind them.
+//
+// The fill is deliberately flat. See the banding note above CLR_HEX_SURFACE_0:
+// a SURFACE_1 → SURFACE_0 gradient only survives RGB565 as ~4 single-channel
+// steps, which read as coloured seams rather than a smooth ramp.
 static inline void ui_style_surface(lv_obj_t *obj, int radius) {
   lv_obj_set_style_bg_color(obj, lv_color_hex(CLR_HEX_SURFACE_1), 0);
-  lv_obj_set_style_bg_grad_color(obj, lv_color_hex(CLR_HEX_SURFACE_0), 0);
-  lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
+  lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_NONE, 0);
   lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
   lv_obj_set_style_border_color(obj, lv_color_hex(CLR_HEX_HAIRLINE), 0);
   lv_obj_set_style_border_opa(obj, LV_OPA_COVER, 0);

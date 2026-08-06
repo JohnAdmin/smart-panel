@@ -487,8 +487,7 @@ void create_scene_tiles(lv_obj_t *parent) {
     lv_obj_clear_flag(card,
                       LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS);
     lv_obj_set_style_bg_color(card, lv_color_hex(CLR_HEX_SURFACE_1), 0);
-    lv_obj_set_style_bg_grad_color(card, lv_color_hex(CLR_HEX_SURFACE_0), 0);
-    lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_NONE, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_90, 0);
     lv_obj_set_style_border_color(card, lv_color_hex(CLR_HEX_HAIRLINE), 0);
     lv_obj_set_style_border_opa(card, LV_OPA_COVER, 0);
