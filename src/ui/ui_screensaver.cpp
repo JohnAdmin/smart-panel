@@ -378,25 +378,34 @@ void build_screensaver() {
                stockEnabled ? (SS_TICKER_Y - 26) : (SS_STATUS_Y - 26));
   lv_obj_set_style_bg_opa(foot_rule, LV_OPA_50, 0);
 
-  // Status row — weather on the left, connectivity on the right
+  // Status row — weather on the left, connectivity on the right.
+  //
+  // A flex row rather than two absolute widths. The weather string is the one
+  // that varies: a Thai condition and a Thai place name are far longer than
+  // "Partly Cloudy · Bangkok", and the old fixed 250 px cut them off. Letting
+  // it take whatever the connectivity label does not use means the split
+  // follows the text instead of a number someone guessed once — and the
+  // connectivity side changes width too, as the device count does.
   lv_obj_t *status_row = create_ss_row(ss_content_wrap, SS_STATUS_Y);
+  lv_obj_set_flex_flow(status_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(status_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(status_row, 14, 0);
 
   ss_label_sysinfo = lv_label_create(status_row);
   lv_obj_set_style_text_font(ss_label_sysinfo, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(ss_label_sysinfo, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_label_set_long_mode(ss_label_sysinfo, LV_LABEL_LONG_DOT);
-  // Fixed height pins this to one line — the old 205 px width let a long
-  // "temp / condition / city" string wrap and push the row out of shape.
-  lv_obj_set_size(ss_label_sysinfo, 250, SS_ROW_H);
+  // Fixed height pins it to one line; the width comes from the flex grow.
+  lv_obj_set_height(ss_label_sysinfo, SS_ROW_H);
+  lv_obj_set_flex_grow(ss_label_sysinfo, 1);
   lv_label_set_text(ss_label_sysinfo, "");
-  lv_obj_align(ss_label_sysinfo, LV_ALIGN_LEFT_MID, 0, 0);
 
   ss_label_mqtt_wifi = lv_label_create(status_row);
   lv_obj_set_style_text_font(ss_label_mqtt_wifi, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(ss_label_mqtt_wifi, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
   lv_label_set_recolor(ss_label_mqtt_wifi, true);
   lv_label_set_text(ss_label_mqtt_wifi, "");
-  lv_obj_align(ss_label_mqtt_wifi, LV_ALIGN_RIGHT_MID, 0, 0);
 
   // === Stock ticker row (above the status row, only when stockEnabled) ===
   if (stockEnabled) {
