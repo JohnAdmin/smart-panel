@@ -449,10 +449,10 @@ void update_screensaver() {
   if (weatherValid) {
     if (weatherCityName[0])
       snprintf(wBuf, sizeof(wBuf), "%.0f\xC2\xB0""  %s  \xC2\xB7  %s",
-               weatherTemp, weatherDesc, weatherCityName);
+               weatherTemp, wmoToDesc(weatherCode), weatherCityName);
     else
       snprintf(wBuf, sizeof(wBuf), "%.0f\xC2\xB0""  %s",
-               weatherTemp, weatherDesc);
+               weatherTemp, wmoToDesc(weatherCode));
   }
 
   // --- Connectivity: coloured glyphs + how much of the house is on ---

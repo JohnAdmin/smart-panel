@@ -49,7 +49,7 @@ char currentDate[24] = "Mon, 01 Jan 2024";
 char currentMeridiem[4] = "";
 
 float weatherTemp = 0;
-char weatherDesc[32] = "";
+int weatherCode = 0;
 char weatherCity[32] = DEFAULT_WEATHER_CITY;
 char weatherCityName[32] = DEFAULT_WEATHER_CITY;
 bool weatherValid = false;

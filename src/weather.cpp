@@ -3,30 +3,25 @@
 
 #include "config.h"
 #include "globals.h" // safe_wdt_reset()
+#include "lang.h"    // wmoToDesc() returns translated strings
 #include "wifi_manager.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 
 // --- WMO weather code to human-readable description ---
-static const char *wmoToDesc(int code) {
-  if (code == 0)
-    return "Clear";
-  if (code <= 3)
-    return "Partly Cloudy";
-  if (code <= 49)
-    return "Foggy";
-  if (code <= 59)
-    return "Drizzle";
-  if (code <= 69)
-    return "Rain";
-  if (code <= 79)
-    return "Snow";
-  if (code <= 84)
-    return "Showers";
-  if (code <= 94)
-    return "Thunderstorm";
-  return "Storm";
+// Looked up on every call so the text follows the active language, grouped the
+// way Open-Meteo documents the ranges.
+const char *wmoToDesc(int code) {
+  if (code == 0)  return L(L_WX_CLEAR);
+  if (code <= 3)  return L(L_WX_PARTLY);
+  if (code <= 49) return L(L_WX_FOG);
+  if (code <= 59) return L(L_WX_DRIZZLE);
+  if (code <= 69) return L(L_WX_RAIN);
+  if (code <= 79) return L(L_WX_SNOW);
+  if (code <= 84) return L(L_WX_SHOWERS);
+  if (code <= 94) return L(L_WX_THUNDER);
+  return L(L_WX_STORM);
 }
 
 // Geocoding cache — avoids re-resolving same city every update
@@ -119,12 +114,10 @@ void fetchWeather() {
     DeserializationError err = deserializeJson(doc, http.getString());
     if (!err) {
       weatherTemp = doc["current_weather"]["temperature"].as<float>();
-      int wmoCode = doc["current_weather"]["weathercode"].as<int>();
-      strncpy(weatherDesc, wmoToDesc(wmoCode), sizeof(weatherDesc) - 1);
-      weatherDesc[sizeof(weatherDesc) - 1] = '\0';
+      weatherCode = doc["current_weather"]["weathercode"].as<int>();
       weatherValid = true;
       Serial.printf("[WEATHER] %s %.1fC, %s\n", weatherCityName, weatherTemp,
-                    weatherDesc);
+                    wmoToDesc(weatherCode));
     } else {
       Serial.printf("[WEATHER] JSON error: %s\n", err.c_str());
       weatherValid = false;

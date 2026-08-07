@@ -154,3 +154,5 @@ bool addDevice(const char *name, const char *room, const char *stat,
 void deleteDevice(int index);
 const char *getIconSymbol(int icon_type);
 void fetchWeather();
+// Human-readable condition for a WMO code, in the active language.
+const char *wmoToDesc(int code);
