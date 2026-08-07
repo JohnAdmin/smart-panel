@@ -257,8 +257,14 @@ const char index_html[] PROGMEM = R"rawliteral(
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-slate-300 mb-1.5">Weather City <span class="text-[10px] text-slate-500 font-normal block">(Screensaver)</span></label>
-                            <input type="text" id="weather_city" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all placeholder-slate-500" placeholder="City">
+                            <label class="block text-sm font-medium text-slate-300 mb-1.5">Weather City <span class="text-[10px] text-slate-500 font-normal block">(Screensaver &amp; Air Quality)</span></label>
+                            <div id="city-field" class="relative">
+                                <input type="text" id="weather_city" autocomplete="off" oninput="onCityInput()" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all placeholder-slate-500" placeholder="Start typing a city...">
+                                <div id="city-results" class="hidden absolute z-20 mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto"></div>
+                                <input type="hidden" id="weather_lat" value="0">
+                                <input type="hidden" id="weather_lon" value="0">
+                                <span id="city-pinned" class="hidden text-[10px] text-emerald-400 mt-1 block"></span>
+                            </div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-1.5">Panel Title</label>
@@ -924,6 +930,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             document.getElementById('mqtt_usr').value = data.mqtt_usr || '';
             document.getElementById('mqtt_pwd').value = data.mqtt_pwd || '';
             document.getElementById('weather_city').value = data.weather_city || '';
+            setCityCoords(data.weather_lat || 0, data.weather_lon || 0);
             document.getElementById('panel_title').value = data.panel_title || 'Hero Home Panel';
             document.getElementById('theme_dark').value = data.theme_dark !== undefined ? data.theme_dark.toString() : 'true';
             document.getElementById('large_tiles').value = data.large_tiles !== undefined ? data.large_tiles.toString() : 'false';
@@ -1058,6 +1065,81 @@ const char index_html[] PROGMEM = R"rawliteral(
         manageRooms();
         showToast('Renamed "' + oldName + '" -> "' + trimmed + '" (' + count + ' devices)');
     }
+
+    // ── Weather city picker ──────────────────────────────────────────────
+    // Queries Open-Meteo's geocoding API straight from the browser (it sends
+    // access-control-allow-origin: *), so the panel never proxies it — that
+    // keeps the request off the ESP32's network task, which runs under a 5 s
+    // watchdog.
+    //
+    // Picking a result pins its coordinates; typing by hand clears them, which
+    // tells the firmware to geocode the name at boot the way it always did.
+    // Without that, editing the city after a pick would leave the panel
+    // fetching weather for the previous place.
+    let cityPickTimer = null;
+
+    function setCityCoords(lat, lon) {
+        document.getElementById('weather_lat').value = lat;
+        document.getElementById('weather_lon').value = lon;
+        const pin = document.getElementById('city-pinned');
+        if (lat || lon) {
+            pin.textContent = `pinned to ${(+lat).toFixed(2)}, ${(+lon).toFixed(2)}`;
+            pin.classList.remove('hidden');
+        } else {
+            pin.classList.add('hidden');
+        }
+    }
+
+    function hideCityResults() {
+        document.getElementById('city-results').classList.add('hidden');
+    }
+
+    function onCityInput() {
+        setCityCoords(0, 0); // hand-typed: back to geocoding by name
+        clearTimeout(cityPickTimer);
+        const q = document.getElementById('weather_city').value.trim();
+        if (q.length < 2) { hideCityResults(); return; }
+        cityPickTimer = setTimeout(() => searchCity(q), 300);
+    }
+
+    async function searchCity(q) {
+        const box = document.getElementById('city-results');
+        try {
+            const r = await fetch(
+                'https://geocoding-api.open-meteo.com/v1/search?count=5&format=json&name=' +
+                encodeURIComponent(q));
+            if (!r.ok) { hideCityResults(); return; }
+            const results = (await r.json()).results || [];
+            if (!results.length) { hideCityResults(); return; }
+
+            box.innerHTML = results.map((c, i) => {
+                // Region and country disambiguate same-named places, which is
+                // the whole point of picking from a list.
+                const where = [c.admin1, c.country].filter(Boolean).join(', ');
+                return `<button type="button" data-i="${i}"
+                    class="w-full text-left px-4 py-2 hover:bg-slate-700/60 transition-colors border-b border-slate-700/40 last:border-0">
+                    <span class="text-sm text-slate-100">${escHtml(c.name)}</span>
+                    <span class="text-xs text-slate-500 ml-2">${escHtml(where)}</span>
+                </button>`;
+            }).join('');
+
+            box.querySelectorAll('button').forEach(btn => {
+                btn.onclick = () => {
+                    const c = results[+btn.dataset.i];
+                    document.getElementById('weather_city').value = c.name;
+                    setCityCoords(c.latitude, c.longitude);
+                    hideCityResults();
+                };
+            });
+            box.classList.remove('hidden');
+        } catch (e) {
+            hideCityResults(); // offline browser: the field still works as text
+        }
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#city-field')) hideCityResults();
+    });
 
     let ROOMS = [];
 
@@ -1336,6 +1418,8 @@ const char index_html[] PROGMEM = R"rawliteral(
             mqtt_usr: document.getElementById('mqtt_usr').value,
             mqtt_pwd: document.getElementById('mqtt_pwd').value,
             weather_city: document.getElementById('weather_city').value,
+            weather_lat: parseFloat(document.getElementById('weather_lat').value) || 0,
+            weather_lon: parseFloat(document.getElementById('weather_lon').value) || 0,
             panel_title: document.getElementById('panel_title').value,
             theme_dark: document.getElementById('theme_dark').value === 'true',
             large_tiles: document.getElementById('large_tiles').value === 'true',

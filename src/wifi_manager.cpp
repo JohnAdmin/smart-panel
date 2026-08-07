@@ -55,6 +55,8 @@ char weatherCityName[32] = DEFAULT_WEATHER_CITY;
 bool weatherValid = false;
 int  airQualityAqi = 0;
 bool airQualityValid = false;
+float weatherLat = 0.0f;
+float weatherLon = 0.0f;
 
 unsigned long lastTouchTime = 0;
 bool screensaverActive = false;
@@ -211,6 +213,11 @@ void loadSettings() {
 
   strncpy(weatherCityName, weatherCity, sizeof(weatherCityName) - 1);
   weatherCityName[sizeof(weatherCityName) - 1] = '\0';
+
+  // Written directly by the /api/save handler rather than threaded through
+  // applySettings(), whose signature is long enough already.
+  weatherLat = preferences.getFloat("w_lat", 0.0f);
+  weatherLon = preferences.getFloat("w_lon", 0.0f);
 
   String title = preferences.getString("panel_title", "Hero Home Panel");
   strncpy(panelTitle, title.c_str(), sizeof(panelTitle) - 1);

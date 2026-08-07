@@ -52,6 +52,10 @@ extern char weatherDesc[32];
 extern char weatherCity[32];
 extern char weatherCityName[32];
 extern bool weatherValid;
+// Coordinates chosen in the portal's city picker. Zero means "never picked" —
+// fetchWeather() then geocodes the city name the way it always did.
+extern float weatherLat;
+extern float weatherLon;
 
 // --- Air quality (Open-Meteo, same coordinates as the weather fetch) ---
 extern int  airQualityAqi;   // US AQI, 0-500

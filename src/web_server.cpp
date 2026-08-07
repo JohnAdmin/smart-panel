@@ -202,6 +202,10 @@ void web_server_init() {
     doc["mqtt_usr"] = mqtt_username;
     doc["mqtt_pwd"] = "********";
     doc["weather_city"] = weatherCity;
+    // Zero means the city was typed rather than picked, and the panel will
+    // geocode it. The portal uses that to decide whether to show "pinned".
+    doc["weather_lat"] = weatherLat;
+    doc["weather_lon"] = weatherLon;
     doc["panel_title"] = panelTitle;
     doc["theme_dark"] = themeDark;
     doc["large_tiles"] = useLargeTiles;
@@ -365,6 +369,21 @@ void web_server_init() {
             mqtt_port = doc["mqtt_port"] | DEFAULT_MQTT_PORT;
             preferences.begin(NVS_NAMESPACE, false);
             preferences.putInt("mqtt_port", mqtt_port);
+
+            // City coordinates. The portal sends 0/0 when the field was typed
+            // rather than picked from the list, which clears any earlier pin
+            // and puts the panel back on geocoding — otherwise editing the
+            // city by hand would leave it fetching for the previous place.
+            float w_lat = doc["weather_lat"] | 0.0f;
+            float w_lon = doc["weather_lon"] | 0.0f;
+            if (w_lat < -90.0f || w_lat > 90.0f || w_lon < -180.0f ||
+                w_lon > 180.0f) {
+              w_lat = w_lon = 0.0f;
+            }
+            weatherLat = w_lat;
+            weatherLon = w_lon;
+            preferences.putFloat("w_lat", w_lat);
+            preferences.putFloat("w_lon", w_lon);
             preferences.end();
             request->send(200, "text/plain", "OK");
             Serial.println("[WEB] Settings saved — restarting now...");

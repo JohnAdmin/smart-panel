@@ -43,8 +43,20 @@ void fetchWeather() {
   float lat = DEFAULT_LATITUDE;
   float lon = DEFAULT_LONGITUDE;
 
+  // 0. Coordinates picked in the portal win outright. The city name alone is
+  // ambiguous — a "Springfield" resolves somewhere, just not necessarily the
+  // one you meant — and skipping geocoding also drops a blocking HTTP call
+  // from every boot and every refresh.
+  if (weatherLat != 0.0f || weatherLon != 0.0f) {
+    lat = weatherLat;
+    lon = weatherLon;
+    strncpy(weatherCityName, weatherCity, sizeof(weatherCityName) - 1);
+    weatherCityName[sizeof(weatherCityName) - 1] = '\0';
+    Serial.printf("[WEATHER] Using saved coords for %s: %.4f,%.4f\n",
+                  weatherCity, lat, lon);
+  }
   // 1. Geocoding — resolve city name to lat/lon (cached)
-  if (strlen(weatherCity) > 0) {
+  else if (strlen(weatherCity) > 0) {
     if (strcmp(weatherCity, cached_city) == 0 && cached_lat != 0) {
       // Use cached coordinates
       lat = cached_lat;
