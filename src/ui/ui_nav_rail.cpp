@@ -55,7 +55,10 @@ static void nav_btn_cb(lv_event_t *e) {
   switch (dest) {
   case UI_NAV_HOME:
   case UI_NAV_SCENES:
-    ui_show_main_view(dest == UI_NAV_HOME ? UI_VIEW_HOME : UI_VIEW_SCENES);
+  case UI_NAV_SENSORS:
+    ui_show_main_view(dest == UI_NAV_HOME     ? UI_VIEW_HOME
+                      : dest == UI_NAV_SCENES ? UI_VIEW_SCENES
+                                              : UI_VIEW_SENSORS);
     if (lv_scr_act() != ui_ScreenMain)
       lv_scr_load_anim(ui_ScreenMain, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
     break;
@@ -78,7 +81,8 @@ static void saver_btn_cb(lv_event_t *e) {
 // fill: the rail sits next to device tiles that use a solid accent to mean
 // "this device is on", and a filled nav button would read as the same signal.
 static lv_obj_t *rail_btn(lv_obj_t *rail, const char *glyph, int y,
-                          bool active, lv_event_cb_t cb, void *user_data) {
+                          bool active, lv_event_cb_t cb, void *user_data,
+                          const lv_font_t *font = &lv_font_montserrat_18) {
   lv_obj_t *btn = lv_btn_create(rail);
   lv_obj_set_size(btn, 38, 38);
   lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, y);
@@ -92,7 +96,7 @@ static lv_obj_t *rail_btn(lv_obj_t *rail, const char *glyph, int y,
 
   lv_obj_t *lbl = lv_label_create(btn);
   lv_label_set_text(lbl, glyph);
-  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_font(lbl, font, 0);
   lv_obj_set_style_text_color(lbl,
                               lv_color_hex(active ? CLR_HEX_ACCENT
                                                   : CLR_HEX_TEXT_LOW), 0);
@@ -139,14 +143,20 @@ lv_obj_t *ui_nav_rail_create(lv_obj_t *screen, UiNavDest active) {
   rail_register_logo(rail, logo_lbl);
 
   // Four destinations, 38 px tall on a 42 px pitch, starting below the logo.
+  // Sensors takes its glyph from the Material set — FontAwesome's subset here
+  // has no thermometer, and a droplet would read as "humidity only".
   static const char *glyphs[UI_NAV_COUNT] = {
       LV_SYMBOL_HOME,     // house
       LV_SYMBOL_VIDEO,    // film — scenes + schedule
+      NULL,               // sensors — filled in below
       LV_SYMBOL_SETTINGS, // gear
   };
+  glyphs[UI_NAV_SENSORS] = getIconSymbol(ICON_THERMOSTAT);
   for (int i = 0; i < UI_NAV_COUNT; i++)
     rail_btn(rail, glyphs[i], 48 + i * 42, active == (UiNavDest)i, nav_btn_cb,
-             (void *)(intptr_t)i);
+             (void *)(intptr_t)i,
+             i == UI_NAV_SENSORS ? &material_icons_font
+                                 : &lv_font_montserrat_18);
 
   // Screensaver — an action, parked at the far end of the rail so it never
   // reads as a fifth destination.

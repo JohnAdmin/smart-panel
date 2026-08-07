@@ -490,6 +490,7 @@ static lv_obj_t *create_device_tile(lv_obj_t *parent, int idx, int tile_w,
 #define VIEW_FAVORITES UI_VIEW_FAVORITES
 #define VIEW_SCENES    UI_VIEW_SCENES
 #define VIEW_SCHEDULE  UI_VIEW_SCHEDULE
+#define VIEW_SENSORS   UI_VIEW_SENSORS
 static int s_view = VIEW_HOME;
 
 int ui_current_main_view() { return s_view; }
@@ -1054,6 +1055,238 @@ static void build_scenes_view() {
 }
 
 // ========================================================
+//  SENSORS VIEW
+// ========================================================
+// Three stat cards over a per-room table. The design's third card is air
+// quality; nothing in this firmware measures it and inventing a number would
+// be worse than omitting one, so the slot shows the outdoor weather instead —
+// which is real, already fetched, and the obvious companion to indoor
+// readings now that the weather hero card has left Home.
+
+static lv_obj_t *sensor_stat_card(lv_obj_t *parent, const char *label) {
+  lv_obj_t *card = lv_obj_create(parent);
+  lv_obj_set_size(card, UI_ROOM_CARD_W, 64);
+  lv_obj_set_style_bg_color(card, lv_color_hex(CLR_HEX_SURFACE_1), 0);
+  lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_NONE, 0);
+  lv_obj_set_style_bg_opa(card, LV_OPA_90, 0);
+  lv_obj_set_style_border_color(card, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_width(card, 1, 0);
+  lv_obj_set_style_border_opa(card, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(card, UI_CARD_RADIUS, 0);
+  lv_obj_set_style_shadow_width(card, 0, 0);
+  lv_obj_set_style_pad_all(card, 10, 0);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t *lbl = lv_label_create(card);
+  lv_label_set_text(lbl, label);
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(lbl, UI_ROOM_CARD_W - 20);
+  lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, 0);
+  return card;
+}
+
+static void sensor_stat_value(lv_obj_t *card, const char *text,
+                              lv_color_t color) {
+  lv_obj_t *v = lv_label_create(card);
+  lv_label_set_text(v, text);
+  lv_obj_set_style_text_font(v, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_color(v, color, 0);
+  lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(v, UI_ROOM_CARD_W - 20);
+  lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
+// One room's line in the table: name, how many of its devices are on, and its
+// two readings. Rooms with no climate topic still appear — the dashes say
+// "not measured here", which is more useful than hiding the room.
+static void sensor_room_row(lv_obj_t *parent, int room_idx, bool last) {
+  lv_obj_t *row = lv_obj_create(parent);
+  lv_obj_set_size(row, LV_PCT(100), 31);
+  lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_radius(row, 0, 0);
+  lv_obj_set_style_shadow_width(row, 0, 0);
+  lv_obj_set_style_pad_all(row, 0, 0);
+  // A hairline under every line but the last reads as a table without boxing
+  // each cell in.
+  lv_obj_set_style_border_width(row, last ? 0 : 1, 0);
+  lv_obj_set_style_border_color(row, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_opa(row, LV_OPA_50, 0);
+  lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+  const Room &rm = rooms[room_idx];
+  int on = 0, total = 0;
+  room_count_devices(room_idx, &on, &total);
+
+  char nm[48];
+  strncpy(nm, rm.name, sizeof(nm) - 1);
+  nm[sizeof(nm) - 1] = '\0';
+  sanitize_visible_text(nm);
+
+  lv_obj_t *name = lv_label_create(row);
+  lv_label_set_text(name, nm);
+  lv_obj_set_style_text_font(name, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(name, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(name, 176);
+  lv_obj_align(name, LV_ALIGN_LEFT_MID, 0, 0);
+
+  lv_obj_t *on_lbl = lv_label_create(row);
+  if (on > 0) {
+    char b[24];
+    snprintf(b, sizeof(b), L(L_ON_COUNT), on);
+    lv_label_set_text(on_lbl, b);
+    lv_obj_set_style_text_color(on_lbl, lv_color_hex(CLR_HEX_ACCENT_HI), 0);
+  } else {
+    lv_label_set_text(on_lbl, "\xE2\x80\x94"); // em dash
+    lv_obj_set_style_text_color(on_lbl, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  }
+  lv_obj_set_style_text_font(on_lbl, &lv_font_montserrat_12, 0);
+  lv_obj_set_width(on_lbl, 70);
+  lv_obj_set_style_text_align(on_lbl, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_align(on_lbl, LV_ALIGN_LEFT_MID, 180, 0);
+
+  lv_obj_t *t = lv_label_create(row);
+  lv_obj_set_style_text_font(t, &lv_font_montserrat_12, 0);
+  lv_obj_set_width(t, 62);
+  lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_align(t, LV_ALIGN_LEFT_MID, 256, 0);
+
+  lv_obj_t *h = lv_label_create(row);
+  lv_obj_set_style_text_font(h, &lv_font_montserrat_12, 0);
+  lv_obj_set_width(h, 56);
+  lv_obj_set_style_text_align(h, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_align(h, LV_ALIGN_LEFT_MID, 322, 0);
+
+  if (rm.climateValid) {
+    lv_label_set_text_fmt(t, "%.1f\xC2\xB0", rm.temp);
+    lv_obj_set_style_text_color(t, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+    lv_label_set_text_fmt(h, "%d%%", rm.hum);
+    lv_obj_set_style_text_color(h, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  } else {
+    lv_label_set_text(t, "\xE2\x80\x94");
+    lv_obj_set_style_text_color(t, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+    lv_label_set_text(h, "\xE2\x80\x94");
+    lv_obj_set_style_text_color(h, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  }
+}
+
+static void build_sensors_view() {
+  ui_set_header_title(L(L_SENSORS));
+
+  // Averages come only from rooms that actually report, so one configured
+  // sensor doesn't get diluted by every room that has none.
+  float t_sum = 0.0f;
+  int h_sum = 0, n = 0;
+  for (int r = 0; r < roomCount; r++) {
+    if (!rooms[r].climateValid) continue;
+    t_sum += rooms[r].temp;
+    h_sum += rooms[r].hum;
+    n++;
+  }
+
+  lv_obj_t *page = lv_obj_create(main_body_container);
+  lv_obj_set_size(page, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_style_bg_opa(page, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(page, 0, 0);
+  lv_obj_set_style_pad_all(page, UI_CONTENT_PAD, 0);
+  lv_obj_set_style_pad_row(page, 8, 0);
+  lv_obj_set_style_pad_column(page, 8, 0);
+  lv_obj_set_flex_flow(page, LV_FLEX_FLOW_ROW_WRAP);
+  lv_obj_set_flex_align(page, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                        LV_FLEX_ALIGN_START);
+  lv_obj_set_scroll_dir(page, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_AUTO);
+  ui_style_scrollbar(page);
+
+  char buf[32];
+  lv_obj_t *c1 = sensor_stat_card(page, L(L_AVG_TEMP));
+  if (n) {
+    snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", t_sum / n);
+    sensor_stat_value(c1, buf, lv_color_hex(CLR_HEX_TEXT_HI));
+  } else {
+    sensor_stat_value(c1, "\xE2\x80\x94", lv_color_hex(CLR_HEX_TEXT_LOW));
+  }
+
+  lv_obj_t *c2 = sensor_stat_card(page, L(L_AVG_HUM));
+  if (n) {
+    snprintf(buf, sizeof(buf), "%d%%", h_sum / n);
+    sensor_stat_value(c2, buf, lv_color_hex(CLR_HEX_TEXT_HI));
+  } else {
+    sensor_stat_value(c2, "\xE2\x80\x94", lv_color_hex(CLR_HEX_TEXT_LOW));
+  }
+
+  lv_obj_t *c3 = sensor_stat_card(page, L(L_OUTDOOR));
+  if (weatherValid) {
+    snprintf(buf, sizeof(buf), "%.0f\xC2\xB0", weatherTemp);
+    sensor_stat_value(c3, buf, lv_color_hex(CLR_HEX_OK));
+  } else {
+    sensor_stat_value(c3, "\xE2\x80\x94", lv_color_hex(CLR_HEX_TEXT_LOW));
+  }
+
+  // ── Per-room table ──
+  lv_obj_t *table = lv_obj_create(page);
+  lv_obj_set_size(table, LV_PCT(100), UI_CONTENT_H - UI_CONTENT_PAD * 2 - 72);
+  lv_obj_set_style_bg_color(table, lv_color_hex(CLR_HEX_SURFACE_1), 0);
+  lv_obj_set_style_bg_grad_dir(table, LV_GRAD_DIR_NONE, 0);
+  lv_obj_set_style_bg_opa(table, LV_OPA_90, 0);
+  lv_obj_set_style_border_color(table, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_width(table, 1, 0);
+  lv_obj_set_style_border_opa(table, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(table, UI_CARD_RADIUS, 0);
+  lv_obj_set_style_shadow_width(table, 0, 0);
+  lv_obj_set_style_pad_all(table, 10, 0);
+  lv_obj_set_style_pad_row(table, 0, 0);
+  lv_obj_set_flex_flow(table, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_scroll_dir(table, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(table, LV_SCROLLBAR_MODE_AUTO);
+  ui_style_scrollbar(table);
+
+  // Count the rooms that will actually get a line, so the last one can drop
+  // its divider.
+  int shown = 0, last_idx = -1;
+  for (int r = 0; r < roomCount; r++) {
+    int total = 0;
+    room_count_devices(r, NULL, &total);
+    if (total == 0 && !rooms[r].climateValid) continue;
+    shown++;
+    last_idx = r;
+  }
+
+  if (shown == 0) {
+    lv_obj_t *empty = lv_label_create(table);
+    lv_label_set_text(empty, L(L_NO_ROOMS));
+    lv_obj_set_style_text_color(empty, lv_color_hex(CLR_HEX_TEXT_MID), 0);
+    lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(empty, LV_PCT(100));
+    lv_obj_set_style_pad_top(empty, 40, 0);
+    return;
+  }
+
+  for (int r = 0; r < roomCount; r++) {
+    int total = 0;
+    room_count_devices(r, NULL, &total);
+    if (total == 0 && !rooms[r].climateValid) continue;
+    sensor_room_row(table, r, r == last_idx);
+  }
+
+  // Nothing reports yet — say what to do about it rather than leaving a table
+  // of dashes with no explanation.
+  if (n == 0) {
+    lv_obj_t *hint = lv_label_create(table);
+    lv_label_set_text(hint, L(L_NO_SENSORS));
+    lv_obj_set_style_text_color(hint, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+    lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(hint, LV_PCT(100));
+    lv_obj_set_style_pad_top(hint, 14, 0);
+  }
+}
+
+// ========================================================
 //  REBUILD GRID
 // ========================================================
 void rebuild_grid() {
@@ -1084,7 +1317,8 @@ void rebuild_grid() {
 
   // Scenes and schedules stand on their own — a panel with no devices can still
   // have both, so only the device-backed views fall back to Home here.
-  if (deviceCount == 0 && s_view != VIEW_SCENES && s_view != VIEW_SCHEDULE) {
+  if (deviceCount == 0 && s_view != VIEW_SCENES && s_view != VIEW_SCHEDULE &&
+      s_view != VIEW_SENSORS) {
     s_view = VIEW_HOME;
     ui_set_header_title(panelTitle);
     lv_obj_t *empty_lbl = lv_label_create(main_body_container);
@@ -1108,6 +1342,7 @@ void rebuild_grid() {
   case VIEW_HOME:     build_home_view(); break;
   case VIEW_SCENES:   build_scenes_view(); break;
   case VIEW_SCHEDULE: build_schedule_view(build_tabbed_shell(VIEW_SCHEDULE)); break;
+  case VIEW_SENSORS:  build_sensors_view(); break;
   default:            build_device_view(s_view); break;
   }
 }

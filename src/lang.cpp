@@ -141,6 +141,15 @@ static const char *defaults[LANG_KEY_COUNT] = {
   [L_DAY_SU] = "Su", [L_DAY_MO] = "Mo", [L_DAY_TU] = "Tu",
   [L_DAY_WE] = "We", [L_DAY_TH] = "Th", [L_DAY_FR] = "Fr", [L_DAY_SA] = "Sa",
 
+  // --- Sensors ---
+  [L_SENSORS]       = "Sensors",
+  [L_AVG_TEMP]      = "Avg Temp",
+  [L_AVG_HUM]       = "Avg Humidity",
+  [L_OUTDOOR]       = "Outdoor",
+  [L_NO_SENSORS]    = "No room has a climate topic yet.\n"
+                      "Add one per room in the web portal,\n"
+                      "then restart the panel.",
+
   // --- Screensaver ---
   [L_SMART_HOME]    = "SMART HOME",
   [L_TAP_TO_WAKE]   = "Tap to unlock",
@@ -250,6 +259,8 @@ static const char *key_names[LANG_KEY_COUNT] = {
   [L_DAY_SU]="day_su", [L_DAY_MO]="day_mo", [L_DAY_TU]="day_tu",
   [L_DAY_WE]="day_we", [L_DAY_TH]="day_th", [L_DAY_FR]="day_fr", [L_DAY_SA]="day_sa",
 
+  [L_SENSORS]="sensors", [L_AVG_TEMP]="avg_temp", [L_AVG_HUM]="avg_hum",
+  [L_OUTDOOR]="outdoor", [L_NO_SENSORS]="no_sensors",
   [L_SMART_HOME]="smart_home", [L_TAP_TO_WAKE]="tap_to_wake",
   [L_ICON_NAMES]="icon_names",
 

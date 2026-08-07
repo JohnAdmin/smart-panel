@@ -129,6 +129,13 @@ enum LangKey : uint8_t {
   L_UNKNOWN,
   L_DAY_SU, L_DAY_MO, L_DAY_TU, L_DAY_WE, L_DAY_TH, L_DAY_FR, L_DAY_SA,
 
+  // --- Sensors ---
+  L_SENSORS,
+  L_AVG_TEMP,
+  L_AVG_HUM,
+  L_OUTDOOR,
+  L_NO_SENSORS,
+
   // --- Screensaver ---
   L_SMART_HOME,
   L_TAP_TO_WAKE,
