@@ -143,10 +143,7 @@ void fetchWeather() {
       "http://air-quality-api.open-meteo.com/v1/air-quality?latitude=" +
       String(lat, 4) + "&longitude=" + String(lon, 4) + "&current=us_aqi";
 
-  // Shorter than the other two on purpose: air quality is the least important
-  // reading here, and this call is the one that pushed the cumulative time in
-  // this function past the network task's 5 s watchdog.
-  http.setTimeout(4000);
+  http.setTimeout(HTTP_TIMEOUT_MS);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.begin(aqUrl);
   safe_wdt_reset();

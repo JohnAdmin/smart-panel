@@ -88,7 +88,12 @@ void fetchStocks() {
     Serial.println("[STOCK] http.begin failed");
     return;
   }
+  // This runs on the network task, which is watchdog-supervised, and the GET
+  // blocks it for up to HTTP_TIMEOUT_MS. Feeding either side keeps the request
+  // itself the only thing inside the window.
+  safe_wdt_reset();
   int code = http.GET();
+  safe_wdt_reset();
   if (code != 200) {
     Serial.printf("[STOCK] HTTP %d\n", code);
     http.end();
@@ -96,6 +101,7 @@ void fetchStocks() {
   }
   String body = http.getString();
   http.end();
+  safe_wdt_reset(); // getString() on a slow link is part of the same budget
 
   // Parse — batch response: {"SYM": {...}, ...}
   // Single-symbol fallback: {"symbol": "SYM", "close": "...", ...}
