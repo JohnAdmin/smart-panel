@@ -1471,39 +1471,51 @@ const char index_html[] PROGMEM = R"rawliteral(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         }).then(res => {
-            if(res.ok) {
-                showToast("Configuration saved! Rebooting panel...");
-                let sec = 0;
-                btn.innerHTML = '<svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Rebooting...';
-                const tick = setInterval(() => {
-                    sec++;
-                    btn.innerHTML = '<svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Rebooting... ' + sec + 's';
-                    if (sec >= 5) {
-                        fetch('/api/config', {cache:'no-store'}).then(r => {
-                            if (r.ok) { clearInterval(tick); window.location.reload(); }
-                        }).catch(() => {});
-                    }
-                    if (sec >= 60) {
-                        clearInterval(tick);
-                        btn.innerHTML = orgHtml;
-                        btn.classList.remove('opacity-80', 'cursor-not-allowed', 'pointer-events-none');
-                        showToast('Reboot is taking longer than expected. Please refresh this page manually.', true);
-                    }
-                }, 1000);
+            if (res.ok) {
+                waitForPanel("Configuration saved! Rebooting panel...");
             } else if (res.status === 507) {
-                showToast("Error: Device Memory Full. Delete some devices.", true);
-                btn.innerHTML = orgHtml;
-                btn.classList.remove('opacity-80', 'cursor-not-allowed', 'pointer-events-none');
+                saveFailed("Error: Device Memory Full. Delete some devices.");
             } else {
-                showToast("Error saving configuration.", true);
-                btn.innerHTML = orgHtml;
-                btn.classList.remove('opacity-80', 'cursor-not-allowed', 'pointer-events-none');
+                saveFailed("Error saving configuration.");
             }
-        }).catch(err => {
-            showToast("Network Error saving configuration.", true);
+        }).catch(() => {
+            // The panel answers, waits 300 ms, then reboots — and
+            // ESPAsyncWebServer writes the response from another task, so the
+            // socket is often cut before the browser has read it. A dropped
+            // POST is therefore indistinguishable from a successful one at this
+            // level, and calling it an error was wrong more often than right:
+            // the settings had usually been written before the reset. Wait and
+            // see whether the panel comes back instead of guessing.
+            waitForPanel("Panel stopped responding — it usually means it saved and rebooted. Checking...");
+        });
+
+        function saveFailed(msg) {
+            showToast(msg, true);
             btn.innerHTML = orgHtml;
             btn.classList.remove('opacity-80', 'cursor-not-allowed', 'pointer-events-none');
-        });
+        }
+
+        // Polls until the panel serves /api/config again, then reloads so the
+        // form shows what was actually stored rather than what was typed.
+        function waitForPanel(msg) {
+            showToast(msg);
+            const spin = '<svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+            let sec = 0;
+            btn.innerHTML = spin + ' Rebooting...';
+            const tick = setInterval(() => {
+                sec++;
+                btn.innerHTML = spin + ' Rebooting... ' + sec + 's';
+                if (sec >= 5) {
+                    fetch('/api/config', { cache: 'no-store' }).then(r => {
+                        if (r.ok) { clearInterval(tick); window.location.reload(); }
+                    }).catch(() => {});
+                }
+                if (sec >= 60) {
+                    clearInterval(tick);
+                    saveFailed('Panel has not come back. Check its power and Wi-Fi, then refresh this page to see what was saved.');
+                }
+            }, 1000);
+        }
     }
     function updateTimeoutDisplay(val) {
         const secs = parseInt(val);
