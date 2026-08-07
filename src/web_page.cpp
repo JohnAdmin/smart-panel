@@ -261,9 +261,15 @@ const char index_html[] PROGMEM = R"rawliteral(
                             <div id="city-field" class="relative">
                                 <input type="text" id="weather_city" autocomplete="off" oninput="onCityInput()" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all placeholder-slate-500" placeholder="Start typing a city...">
                                 <div id="city-results" class="hidden absolute z-20 mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto"></div>
-                                <input type="hidden" id="weather_lat" value="0">
-                                <input type="hidden" id="weather_lon" value="0">
-                                <span id="city-pinned" class="hidden text-[10px] text-emerald-400 mt-1 block"></span>
+                                <div class="grid grid-cols-2 gap-2 mt-2">
+                                    <input type="number" step="any" id="weather_lat" oninput="onCoordInput()" class="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-primary placeholder-slate-600" placeholder="Latitude">
+                                    <input type="number" step="any" id="weather_lon" oninput="onCoordInput()" class="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-primary placeholder-slate-600" placeholder="Longitude">
+                                </div>
+                                <div class="flex items-center justify-between mt-1 gap-2">
+                                    <span id="city-pinned" class="text-[10px] text-slate-500"></span>
+                                    <button type="button" onclick="clearCityCoords()" class="text-[10px] text-slate-500 hover:text-primary transition-colors whitespace-nowrap">Look up by name instead</button>
+                                </div>
+                                <p class="mt-1 text-[10px] text-slate-600">Pick a city above to fill these, or type coordinates for somewhere the search does not list &mdash; a Bangkok khet, a village, your own roof. Right-click a spot in Google Maps to read them off.</p>
                             </div>
                         </div>
                         <div>
@@ -1079,15 +1085,38 @@ const char index_html[] PROGMEM = R"rawliteral(
     let cityPickTimer = null;
 
     function setCityCoords(lat, lon) {
-        document.getElementById('weather_lat').value = lat;
-        document.getElementById('weather_lon').value = lon;
+        document.getElementById('weather_lat').value = (lat || lon) ? lat : '';
+        document.getElementById('weather_lon').value = (lat || lon) ? lon : '';
+        renderCityPin();
+    }
+
+    // Coordinates are shown, not hidden, so their state is never a surprise —
+    // which is why typing a city name no longer wipes them. Out-of-range values
+    // are called out here rather than silently zeroed by the firmware.
+    function renderCityPin() {
         const pin = document.getElementById('city-pinned');
-        if (lat || lon) {
-            pin.textContent = `pinned to ${(+lat).toFixed(2)}, ${(+lon).toFixed(2)}`;
-            pin.classList.remove('hidden');
-        } else {
-            pin.classList.add('hidden');
+        const lat = parseFloat(document.getElementById('weather_lat').value);
+        const lon = parseFloat(document.getElementById('weather_lon').value);
+        if (isNaN(lat) && isNaN(lon)) {
+            pin.textContent = 'no coordinates — the panel will look the city up by name';
+            pin.className = 'text-[10px] text-slate-500';
+            return;
         }
+        const bad = isNaN(lat) || isNaN(lon) ||
+                    lat < -90 || lat > 90 || lon < -180 || lon > 180;
+        if (bad) {
+            pin.textContent = 'latitude must be -90..90 and longitude -180..180';
+            pin.className = 'text-[10px] text-red-400';
+        } else {
+            pin.textContent = `pinned to ${lat.toFixed(4)}, ${lon.toFixed(4)} — the city name is just a label`;
+            pin.className = 'text-[10px] text-emerald-400';
+        }
+    }
+
+    function onCoordInput() { renderCityPin(); }
+
+    function clearCityCoords() {
+        setCityCoords(0, 0);
     }
 
     function hideCityResults() {
@@ -1095,7 +1124,9 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     function onCityInput() {
-        setCityCoords(0, 0); // hand-typed: back to geocoding by name
+        // Deliberately does not clear the coordinates: they are visible now, so
+        // a name that disagrees with a pinned location is on screen rather than
+        // hidden. "Look up by name instead" clears them explicitly.
         clearTimeout(cityPickTimer);
         const q = document.getElementById('weather_city').value.trim();
         if (q.length < 2) { hideCityResults(); return; }

@@ -1245,9 +1245,23 @@ static void build_sensors_view() {
                      lv_color_hex(CLR_HEX_TEXT_HI), NULL);
   }
   if (weatherValid) {
+    // The place, not the word "Outdoor". Coordinates can now be pinned by hand
+    // to somewhere the geocoder never named, so which outdoors this is stopped
+    // being obvious — and a city name already implies outdoors. The air-quality
+    // card beside it reads from the same coordinates, so saying it once is
+    // enough in a row this narrow.
+    char where[40];
+    const char *place = weatherCityName[0] ? weatherCityName : weatherCity;
+    if (place[0]) {
+      strncpy(where, place, sizeof(where) - 1);
+      where[sizeof(where) - 1] = '\0';
+      sanitize_visible_text(where);
+    } else {
+      strncpy(where, L(L_OUTDOOR), sizeof(where) - 1);
+      where[sizeof(where) - 1] = '\0';
+    }
     snprintf(buf, sizeof(buf), "%.0f°", weatherTemp);
-    sensor_stat_card(page, card_w, L(L_OUTDOOR), buf,
-                     lv_color_hex(CLR_HEX_OK), NULL);
+    sensor_stat_card(page, card_w, where, buf, lv_color_hex(CLR_HEX_OK), NULL);
   }
   if (airQualityValid) {
     lv_color_t aqi_color;
