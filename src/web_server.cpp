@@ -374,16 +374,25 @@ void web_server_init() {
             // rather than picked from the list, which clears any earlier pin
             // and puts the panel back on geocoding — otherwise editing the
             // city by hand would leave it fetching for the previous place.
-            float w_lat = doc["weather_lat"] | 0.0f;
-            float w_lon = doc["weather_lon"] | 0.0f;
-            if (w_lat < -90.0f || w_lat > 90.0f || w_lon < -180.0f ||
-                w_lon > 180.0f) {
-              w_lat = w_lon = 0.0f;
+            // Absent is not the same as zero. A portal page older than the
+            // coordinate fields sends no weather_lat at all, and treating that
+            // as "clear the pin" silently wiped a pinned location every time
+            // such a tab hit Save. Only an explicit value changes anything;
+            // the portal sends 0 deliberately when the field is emptied.
+            if (doc["weather_lat"].is<float>() || doc["weather_lon"].is<float>()) {
+              float w_lat = doc["weather_lat"] | 0.0f;
+              float w_lon = doc["weather_lon"] | 0.0f;
+              if (w_lat < -90.0f || w_lat > 90.0f || w_lon < -180.0f ||
+                  w_lon > 180.0f) {
+                w_lat = w_lon = 0.0f;
+              }
+              weatherLat = w_lat;
+              weatherLon = w_lon;
+              preferences.putFloat("w_lat", w_lat);
+              preferences.putFloat("w_lon", w_lon);
+            } else {
+              Serial.println("[WEB] No coordinates in payload — keeping stored pin");
             }
-            weatherLat = w_lat;
-            weatherLon = w_lon;
-            preferences.putFloat("w_lat", w_lat);
-            preferences.putFloat("w_lon", w_lon);
             preferences.end();
             request->send(200, "text/plain", "OK");
             Serial.println("[WEB] Settings saved — restarting now...");

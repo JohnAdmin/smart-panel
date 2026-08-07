@@ -69,7 +69,17 @@
 #define MQTT_BACKOFF_MAX_MS   60000   // Maximum MQTT reconnect delay
 #define DEVICE_STATE_SAVE_MS  10000   // Debounced save interval for dirty states
 #define MQTT_HEARTBEAT_MS     30000   // Periodic heartbeat log interval
-#define HTTP_TIMEOUT_MS       10000   // HTTP client timeout for weather API
+// HTTP client timeout for the weather, air-quality and stock fetches. Must
+// stay BELOW the network task's 5 s watchdog (esp_task_wdt_config_t in
+// main.cpp): those fetches block that task, and at the old 10 s a single slow
+// response outlived the watchdog and rebooted the panel. Every call site feeds
+// the watchdog either side of the request, so the budget is one timeout plus
+// JSON parsing — 4 s leaves a second of headroom and is still generous for
+// APIs that normally answer in well under one.
+//
+// A missed reading costs nothing: weather retries in 30 minutes, stocks in 5.
+// A reboot costs the whole panel. Raise the watchdog before raising this.
+#define HTTP_TIMEOUT_MS       4000
 
 // MQTT queue
 #define MQTT_QUEUE_SIZE       16
