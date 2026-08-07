@@ -53,6 +53,10 @@ extern char weatherCity[32];
 extern char weatherCityName[32];
 extern bool weatherValid;
 
+// --- Air quality (Open-Meteo, same coordinates as the weather fetch) ---
+extern int  airQualityAqi;   // US AQI, 0-500
+extern bool airQualityValid;
+
 // --- Stock Ticker ---
 #include "../src/stock.h"
 

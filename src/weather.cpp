@@ -2,6 +2,7 @@
 // Extracted from wifi_manager.cpp — all Open-Meteo weather logic lives here.
 
 #include "config.h"
+#include "globals.h" // safe_wdt_reset()
 #include "wifi_manager.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -60,7 +61,9 @@ void fetchWeather() {
       http.setTimeout(HTTP_TIMEOUT_MS);
       http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
       http.begin(geoUrl);
+      safe_wdt_reset();
       int httpCode = http.GET();
+      safe_wdt_reset();
       if (httpCode == 200) {
         JsonDocument doc;
         DeserializationError err = deserializeJson(doc, http.getString());
@@ -94,8 +97,10 @@ void fetchWeather() {
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.begin(weatherUrl);
+  safe_wdt_reset();
   // Renamed to avoid shadowing the `httpCode` from the geocoding block above
   int weatherHttpCode = http.GET();
+  safe_wdt_reset();
 
   if (weatherHttpCode == 200) {
     JsonDocument doc;
@@ -115,6 +120,44 @@ void fetchWeather() {
   } else {
     Serial.printf("[WEATHER] HTTP error: %d\n", weatherHttpCode);
     weatherValid = false;
+  }
+  http.end();
+
+  // 3. Air quality — a separate Open-Meteo host, but the same coordinates the
+  // geocoding step above already resolved and cached, so this adds a request
+  // rather than a lookup. US AQI rather than European: its 0-50 "Good" band is
+  // the scale most people have seen, and it is what the design's example used.
+  String aqUrl =
+      "http://air-quality-api.open-meteo.com/v1/air-quality?latitude=" +
+      String(lat, 4) + "&longitude=" + String(lon, 4) + "&current=us_aqi";
+
+  // Shorter than the other two on purpose: air quality is the least important
+  // reading here, and this call is the one that pushed the cumulative time in
+  // this function past the network task's 5 s watchdog.
+  http.setTimeout(4000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.begin(aqUrl);
+  safe_wdt_reset();
+  int aqHttpCode = http.GET();
+  safe_wdt_reset();
+
+  if (aqHttpCode == 200) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, http.getString());
+    // A station can be missing the reading even on a 200, in which case the
+    // key is absent or null and the card stays hidden rather than showing 0.
+    if (!err && doc["current"]["us_aqi"].is<int>()) {
+      airQualityAqi = doc["current"]["us_aqi"].as<int>();
+      airQualityValid = (airQualityAqi >= 0 && airQualityAqi <= 500);
+      Serial.printf("[AIR] US AQI %d\n", airQualityAqi);
+    } else {
+      Serial.printf("[AIR] No us_aqi in response (%s)\n",
+                    err ? err.c_str() : "missing key");
+      airQualityValid = false;
+    }
+  } else {
+    Serial.printf("[AIR] HTTP error: %d\n", aqHttpCode);
+    airQualityValid = false;
   }
   http.end();
 }

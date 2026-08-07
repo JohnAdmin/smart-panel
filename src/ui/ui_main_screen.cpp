@@ -1063,9 +1063,14 @@ static void build_scenes_view() {
 // which is real, already fetched, and the obvious companion to indoor
 // readings now that the weather hero card has left Home.
 
-static lv_obj_t *sensor_stat_card(lv_obj_t *parent, const char *label) {
+// One stat card. Width is passed in because the row sizes itself to however
+// many cards actually have data — a card with nothing to say is not drawn at
+// all, so an empty box never appears.
+static void sensor_stat_card(lv_obj_t *parent, int w, const char *label,
+                             const char *value, lv_color_t value_color,
+                             const char *sub) {
   lv_obj_t *card = lv_obj_create(parent);
-  lv_obj_set_size(card, UI_ROOM_CARD_W, 64);
+  lv_obj_set_size(card, w, 64);
   lv_obj_set_style_bg_color(card, lv_color_hex(CLR_HEX_SURFACE_1), 0);
   lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_NONE, 0);
   lv_obj_set_style_bg_opa(card, LV_OPA_90, 0);
@@ -1082,20 +1087,39 @@ static lv_obj_t *sensor_stat_card(lv_obj_t *parent, const char *label) {
   lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
   lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
   lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(lbl, UI_ROOM_CARD_W - 20);
+  lv_obj_set_width(lbl, w - 20);
   lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, 0);
-  return card;
+
+  lv_obj_t *v = lv_label_create(card);
+  lv_label_set_text(v, value);
+  lv_obj_set_style_text_font(v, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_color(v, value_color, 0);
+  lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(v, w - 20);
+  lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+  // The AQI band name sits under its number; the other cards pass NULL.
+  if (sub) {
+    lv_obj_t *s = lv_label_create(card);
+    lv_label_set_text(s, sub);
+    lv_obj_set_style_text_font(s, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s, value_color, 0);
+    lv_label_set_long_mode(s, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s, w - 20);
+    lv_obj_set_style_text_align(s, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(s, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+  }
 }
 
-static void sensor_stat_value(lv_obj_t *card, const char *text,
-                              lv_color_t color) {
-  lv_obj_t *v = lv_label_create(card);
-  lv_label_set_text(v, text);
-  lv_obj_set_style_text_font(v, &lv_font_montserrat_18, 0);
-  lv_obj_set_style_text_color(v, color, 0);
-  lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(v, UI_ROOM_CARD_W - 20);
-  lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+// US AQI band. Colour runs OK → accent → danger; there is no separate scale
+// for the worst two bands because at that point the number is the message.
+static const char *aqi_band(int aqi, lv_color_t *color) {
+  if (aqi <= 50)  { *color = lv_color_hex(CLR_HEX_OK);        return L(L_AQI_GOOD); }
+  if (aqi <= 100) { *color = lv_color_hex(CLR_HEX_ACCENT_HI); return L(L_AQI_MODERATE); }
+  if (aqi <= 150) { *color = lv_color_hex(CLR_HEX_ACCENT);    return L(L_AQI_SENSITIVE); }
+  if (aqi <= 200) { *color = lv_color_hex(CLR_HEX_DANGER_HI); return L(L_AQI_UNHEALTHY); }
+  *color = lv_color_hex(CLR_HEX_DANGER);
+  return L(L_AQI_HAZARDOUS);
 }
 
 // One room's line in the table: name, how many of its devices are on, and its
@@ -1201,34 +1225,40 @@ static void build_sensors_view() {
   lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_AUTO);
   ui_style_scrollbar(page);
 
+  // Only cards with a real reading are built, and they share the row evenly —
+  // an empty box says nothing and still costs a third of the width.
+  const bool has_indoor = (n > 0);
+  int n_cards = (has_indoor ? 2 : 0) + (weatherValid ? 1 : 0) +
+                (airQualityValid ? 1 : 0);
+  const int avail = UI_CONTENT_W - UI_CONTENT_PAD * 2;
+  const int card_w = n_cards ? (avail - (n_cards - 1) * 8) / n_cards : 0;
+
   char buf[32];
-  lv_obj_t *c1 = sensor_stat_card(page, L(L_AVG_TEMP));
-  if (n) {
-    snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", t_sum / n);
-    sensor_stat_value(c1, buf, lv_color_hex(CLR_HEX_TEXT_HI));
-  } else {
-    sensor_stat_value(c1, "\xE2\x80\x94", lv_color_hex(CLR_HEX_TEXT_LOW));
-  }
-
-  lv_obj_t *c2 = sensor_stat_card(page, L(L_AVG_HUM));
-  if (n) {
+  if (has_indoor) {
+    snprintf(buf, sizeof(buf), "%.1f°", t_sum / n);
+    sensor_stat_card(page, card_w, L(L_AVG_TEMP), buf,
+                     lv_color_hex(CLR_HEX_TEXT_HI), NULL);
     snprintf(buf, sizeof(buf), "%d%%", h_sum / n);
-    sensor_stat_value(c2, buf, lv_color_hex(CLR_HEX_TEXT_HI));
-  } else {
-    sensor_stat_value(c2, "\xE2\x80\x94", lv_color_hex(CLR_HEX_TEXT_LOW));
+    sensor_stat_card(page, card_w, L(L_AVG_HUM), buf,
+                     lv_color_hex(CLR_HEX_TEXT_HI), NULL);
+  }
+  if (weatherValid) {
+    snprintf(buf, sizeof(buf), "%.0f°", weatherTemp);
+    sensor_stat_card(page, card_w, L(L_OUTDOOR), buf,
+                     lv_color_hex(CLR_HEX_OK), NULL);
+  }
+  if (airQualityValid) {
+    lv_color_t aqi_color;
+    const char *band = aqi_band(airQualityAqi, &aqi_color);
+    snprintf(buf, sizeof(buf), "%d", airQualityAqi);
+    sensor_stat_card(page, card_w, L(L_AIR_QUALITY), buf, aqi_color, band);
   }
 
-  lv_obj_t *c3 = sensor_stat_card(page, L(L_OUTDOOR));
-  if (weatherValid) {
-    snprintf(buf, sizeof(buf), "%.0f\xC2\xB0", weatherTemp);
-    sensor_stat_value(c3, buf, lv_color_hex(CLR_HEX_OK));
-  } else {
-    sensor_stat_value(c3, "\xE2\x80\x94", lv_color_hex(CLR_HEX_TEXT_LOW));
-  }
 
   // ── Per-room table ──
   lv_obj_t *table = lv_obj_create(page);
-  lv_obj_set_size(table, LV_PCT(100), UI_CONTENT_H - UI_CONTENT_PAD * 2 - 72);
+  lv_obj_set_size(table, LV_PCT(100),
+                  UI_CONTENT_H - UI_CONTENT_PAD * 2 - (n_cards ? 72 : 0));
   lv_obj_set_style_bg_color(table, lv_color_hex(CLR_HEX_SURFACE_1), 0);
   lv_obj_set_style_bg_grad_dir(table, LV_GRAD_DIR_NONE, 0);
   lv_obj_set_style_bg_opa(table, LV_OPA_90, 0);

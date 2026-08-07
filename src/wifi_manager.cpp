@@ -53,6 +53,8 @@ char weatherDesc[32] = "";
 char weatherCity[32] = DEFAULT_WEATHER_CITY;
 char weatherCityName[32] = DEFAULT_WEATHER_CITY;
 bool weatherValid = false;
+int  airQualityAqi = 0;
+bool airQualityValid = false;
 
 unsigned long lastTouchTime = 0;
 bool screensaverActive = false;
