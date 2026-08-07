@@ -25,6 +25,9 @@ extern MQTTClient mqttClient;
 extern Device devices[MAX_DEVICES];
 extern int deviceCount;
 
+// --- Room State (rooms[] / roomCount declared in room.h) ---
+#include "room.h"
+
 // --- Settings (mutable runtime values) ---
 extern String wifi_ssid;
 extern String wifi_pass;
@@ -85,6 +88,10 @@ extern Preferences preferences;
 
 // --- Safe Watchdog Wrapper ---
 void safe_wdt_reset();
+
+// --- OTA progress (written by the /api/update upload handler on Core 0) ---
+extern volatile bool otaActive;
+extern volatile int  otaProgressPct;
 
 // --- OTA Reboot Flag ---
 extern bool pending_ota_reboot;

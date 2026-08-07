@@ -91,16 +91,6 @@ void hal_note_tile_event() { g_last_tile_event_ms = millis(); }
 static int hit_test_device_tile(uint16_t x, uint16_t y) {
   lv_area_t area;
   for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++) {
-    lv_obj_t *obj = fav_tiles[i];
-    if (obj && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
-      lv_obj_get_coords(obj, &area);
-      if (x >= area.x1 && x <= area.x2 && y >= area.y1 && y <= area.y2) {
-        return i;
-      }
-    }
-  }
-
-  for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++) {
     lv_obj_t *obj = device_tiles[i];
     if (obj && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
       lv_obj_get_coords(obj, &area);

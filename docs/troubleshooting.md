@@ -12,7 +12,12 @@ If you forgot the web portal password but the panel UI is still accessible:
 4. Web auth will be reset to **admin / admin**
 5. Panel will reboot automatically
 
-## Factory Reset (Touch & Hold during Boot)
+## Factory Reset
+
+Two ways in, both wiping the same things (`factory_reset_wipe()` in
+`src/main.cpp`): **Settings → System → Factory Reset** on the panel, which
+confirms first, or the touch-and-hold-during-boot sequence below.
+ (Touch & Hold during Boot)
 
 If the system is unresponsive, stuck, or you cannot access any screen:
 

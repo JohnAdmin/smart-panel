@@ -9,6 +9,7 @@ main.cpp                  System init, dual-core tasks, LVGL loop, screensaver
 ├── device.h              Device struct (name, room, topics, state, brightness)
 ├── hal.cpp/h             LovyanGFX LCD/touch drivers, LVGL callbacks
 ├── device_store.cpp      Device persistence (JSON + legacy binary migration)
+├── room_store.cpp        Room persistence; rooms are discovered from Device.room
 ├── wifi_manager.cpp/h    WiFi, NTP, OTA, NVS settings, encryption
 ├── mqtt_manager.cpp/h    MQTT broker, offline queue, state sync, toggle
 ├── web_server.cpp/h      HTTP portal, REST API
@@ -22,14 +23,15 @@ main.cpp                  System init, dual-core tasks, LVGL loop, screensaver
 └── ui.cpp                LVGL screen init, header, grid, toast
     ├── ui/ui_helpers.h          Shared UI factories + design tokens
     ├── ui/ui_screens.h          Screen/callback declarations, legacy theme macros
-    ├── ui/ui_main_screen.cpp    Dashboard, device tiles, toggle events
-    ├── ui/ui_settings.cpp       Settings form (WiFi, MQTT, theme, system)
+    ├── ui/ui_nav_rail.cpp/h     Left 52 px navigation rail (all screens)
+    ├── ui/ui_main_screen.cpp    Home room cards, room/favourite/scene views, tiles
+    ├── ui/ui_settings.cpp       Settings sidebar + Portal/Display/Devices/System tabs
     ├── ui/ui_device_manager.cpp Device CRUD (list, add, edit, delete)
     ├── ui/ui_dimmer_modal.cpp/h Brightness slider modal
     ├── ui/ui_screensaver.cpp    Flip clock, minimal, off modes + stock bar
     ├── ui/ui_wallpaper.cpp/h    Background image decode/render
     ├── ui/ui_scene_manager.cpp  Scene list/edit/execute UI
-    └── ui/ui_schedule.cpp       Schedule display + enable/disable toggle
+    └── ui/ui_schedule.cpp       Schedule tab body (list, toggle, delete)
 ```
 
 Generated `lv_font_montserrat_*.c` files also live in `src/` — they are produced

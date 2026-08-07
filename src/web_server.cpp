@@ -221,6 +221,7 @@ void web_server_init() {
       dev["state_topic"] = devices[i].state_topic;
       dev["cmnd_topic"] = devices[i].cmnd_topic;
       dev["dimmer_topic"] = devices[i].dimmer_topic;
+      dev["dev_type"] = devices[i].dev_type;
       dev["icon_type"] = devices[i].icon_type;
       dev["is_favorite"] = devices[i].is_favorite;
     }
@@ -284,6 +285,16 @@ void web_server_init() {
                              dev["is_favorite"] | false, false)) {
                 success = false;
                 break;
+              }
+              // Control type. A payload from an older portal build has no
+              // dev_type, so fall back to the same rule loadDevices() uses:
+              // a level topic means a dimmer, anything else a plain switch.
+              {
+                Device &nd = devices[deviceCount - 1];
+                int t = dev["dev_type"] | -1;
+                nd.dev_type = (t >= 0 && t < DEV_TYPE_COUNT)
+                                  ? (uint8_t)t
+                                  : (nd.dimmer_topic[0] ? DEV_DIMMER : DEV_TOGGLE);
               }
             }
 
@@ -451,6 +462,10 @@ void web_server_init() {
           if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
             Update.printError(Serial);
           }
+          // Surfaced on Settings → System, so an upload started from a laptop
+          // is visible on the panel being replaced.
+          otaActive = true;
+          otaProgressPct = 0;
         }
 
         if (!Update.hasError()) {
@@ -459,7 +474,19 @@ void web_server_init() {
           }
         }
 
+        // Update.begin() ran with UPDATE_SIZE_UNKNOWN, so the request's own
+        // content length is the only total available.
+        {
+          const size_t total_len = request->contentLength();
+          if (total_len > 0) {
+            int pct = (int)(((uint64_t)(index + len) * 100) / total_len);
+            otaProgressPct = pct > 100 ? 100 : pct;
+          }
+        }
+
         if (final) {
+          if (!Update.hasError()) otaProgressPct = 100;
+          else                    otaActive = false;
           if (Update.end(true)) {
             Serial.printf("[OTA] Update Success: %uB\n", index + len);
           } else {
@@ -579,6 +606,87 @@ void web_server_init() {
     serializeJson(doc, *response);
     request->send(response);
   });
+
+  // 8b. Rooms API — GET
+  // Rooms are discovered from devices, so this only ever reports what already
+  // exists; the POST below edits the two fields a room owns on top of that.
+  server.on("/api/rooms", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!web_require_auth(request))
+      return;
+
+    JsonDocument doc(&psramAllocator);
+    JsonArray arr = doc["rooms"].to<JsonArray>();
+    for (int i = 0; i < roomCount; i++) {
+      JsonObject r = arr.add<JsonObject>();
+      r["name"] = rooms[i].name;
+      r["icon_type"] = rooms[i].icon_type;
+      r["climate_topic"] = rooms[i].climate_topic;
+      int on = 0, total = 0;
+      room_count_devices(i, &on, &total);
+      r["devices"] = total;
+      r["climate_valid"] = rooms[i].climateValid;
+      if (rooms[i].climateValid) {
+        r["temp"] = rooms[i].temp;
+        r["hum"] = rooms[i].hum;
+      }
+    }
+
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    request->send(response);
+  });
+
+  // 8c. Rooms API — POST (save icon + climate topic)
+  server.on(
+      "/api/rooms", HTTP_POST,
+      [](AsyncWebServerRequest *request) {
+        if (!web_require_auth(request))
+          return;
+      },
+      NULL,
+      [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
+         size_t index, size_t total) {
+        if (!web_authed(request))
+          return;
+
+        web_collect_json_body(
+            request, data, len, index, total, 8192, "/api/rooms",
+            [request](JsonDocument &doc) {
+          if (!doc["rooms"].is<JsonArray>()) {
+            request->send(400, "text/plain", "Missing rooms array");
+            return;
+          }
+          // Matched by name, never by position: the room list is rebuilt from
+          // devices on every boot, so an index from the browser could point at
+          // a different room by the time it arrives.
+          int updated = 0;
+          for (JsonObject r : doc["rooms"].as<JsonArray>()) {
+            const char *name = r["name"] | "";
+            int idx = room_find(name);
+            if (idx < 0) continue;
+            if (r["icon_type"].is<int>()) {
+              int t = r["icon_type"].as<int>();
+              rooms[idx].icon_type = (t >= -1 && t <= 9) ? t : ROOM_ICON_AUTO;
+            }
+            if (r["climate_topic"].is<const char *>()) {
+              String ct = r["climate_topic"].as<const char *>();
+              ct.trim();
+              strncpy(rooms[idx].climate_topic, ct.c_str(),
+                      sizeof(rooms[idx].climate_topic) - 1);
+              rooms[idx].climate_topic[sizeof(rooms[idx].climate_topic) - 1] = '\0';
+              if (!rooms[idx].climate_topic[0]) rooms[idx].climateValid = false;
+            }
+            updated++;
+          }
+          if (!saveRooms()) {
+            request->send(507, "text/plain", "Storage Error");
+            return;
+          }
+          Serial.printf("[WEB] %d rooms saved — restart to re-subscribe\n",
+                        updated);
+          request->send(200, "text/plain", "OK");
+        });
+      });
 
   // 9. Scenes API — GET
   server.on("/api/scenes", HTTP_GET, [](AsyncWebServerRequest *request) {

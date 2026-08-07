@@ -30,6 +30,10 @@ enum LangKey : uint8_t {
   L_CONFIRM_ALL_OFF,
   L_CONFIRM_ALL_OFF_MSG,
   L_NOTHING_ON,
+  L_FAVORITES,
+  L_ON_COUNT,   // "%d on" — room card / row subtitle
+  L_NONE_ON,    // shown in place of L_ON_COUNT when the room is fully off
+  L_NO_ROOMS,
 
   // --- Settings ---
   L_SETTINGS,
@@ -57,6 +61,21 @@ enum LangKey : uint8_t {
   L_RESET_PASS,
   L_LANGUAGE,
   L_HAPTIC,
+  L_DISPLAY,
+  L_SYSTEM,
+  L_MANAGE,
+  L_HOME_LAYOUT,
+  L_LAYOUT_GRID,
+  L_LAYOUT_LIST,
+  L_WALLPAPER,
+
+  L_PANEL_NAME,
+  L_PANEL_NAME_EMPTY,
+  L_RESTART,
+  L_CONFIRM_RESTART,
+  L_FACTORY_RESET,
+  L_CONFIRM_FACTORY_RESET,
+  L_UPDATING,
 
   // --- Device Manager ---
   L_DEVICES,
@@ -71,8 +90,16 @@ enum LangKey : uint8_t {
   L_DIMMER_TOPIC,
   L_DIMMER_TOPIC_HINT,
   L_ICON_TYPE,
+  L_DEV_TYPE,
+  L_TYPE_TOGGLE,
+  L_TYPE_DIMMER,
+  L_TYPE_FAN,
+  L_TYPE_AC,
+  L_SPEED,
+  L_COOLING,
   L_CONFIRM_DELETE,
   L_CONFIRM_DELETE_MSG,
+  L_CONFIRM_DELETE_SCHED,
 
   // --- Dimmer ---
   L_BRIGHTNESS_CTRL,
@@ -104,6 +131,7 @@ enum LangKey : uint8_t {
 
   // --- Screensaver ---
   L_SMART_HOME,
+  L_TAP_TO_WAKE,
 
   // --- UI General ---
   L_ICON_NAMES,

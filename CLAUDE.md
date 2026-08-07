@@ -92,6 +92,21 @@ the display rather than failing loudly.
 flag on Core 0, consume it in `loop()` on Core 1, never touch LVGL from the
 handler.
 
+## Device types
+
+`Device.dev_type` (`DEV_TOGGLE` / `DEV_DIMMER` / `DEV_FAN` / `DEV_AC`) decides
+which control a tile gets. All three non-toggle types share **one numeric
+channel** — `dimmer_topic` on the wire and `brightness` in memory. The names
+and the `devices.json` key are historical and deliberately unchanged so old
+configs load, but the value means brightness (0–100), fan speed (0–3) or target
+°C (18–30) depending on the type; `Device::levelMin/levelMax/clampLevel` own
+those ranges, and `set_device_level()` in `mqtt_manager.cpp` is the only writer.
+
+A config with no `dev_type` key infers one — a device with a level topic
+becomes a dimmer, everything else a switch — which is exactly how the panel
+behaved before types existed. Both `device_store.cpp` and the `/api/save`
+handler apply that same fallback; keep them in step.
+
 ## State and headers
 
 `include/globals.h` declares **all** mutable global state and is the only place
@@ -100,10 +115,56 @@ only — pins, limits, timeouts, defaults. Keep that separation.
 
 ## UI layer
 
-`src/ui.cpp` builds the shell (header, body container, toast); `src/ui/*.cpp`
-build the screens. `src/ui/ui_screens.h` declares the cross-screen surface.
+`src/ui.cpp` builds the shell (nav rail, header, body container, toast);
+`src/ui/*.cpp` build the screens. `src/ui/ui_screens.h` declares the
+cross-screen surface.
 
-Screens follow a `build_*` / `cleanup_*` pairing — sub-screens are destroyed to
+`src/ui/ui_nav_rail.cpp` owns the left 52 px of any screen that calls
+`ui_nav_rail_create()` — it is the top-level navigation (Home · Scenes ·
+Settings, plus a screensaver button). Scenes and schedules share one
+destination with a pill tab row; the fourth slot is reserved for Sensors.
+**Content on those screens is
+laid out against `UI_CONTENT_W` / `UI_CONTENT_H`, not `SCREEN_WIDTH`.** Every
+tile width in `ui_helpers.h` is sized so its column count survives that 428 px
+area; changing one means re-checking the arithmetic in the comment above it.
+Full-screen overlays (screensaver, dimmer modal) still use `SCREEN_WIDTH` —
+they are meant to cover the rail.
+
+`ui_ScreenMain` hosts **views**, not one fixed dashboard. Home (room cards),
+a room's device tiles, favourites, the scene run-grid and the schedule list all
+render into
+`main_body_container`; `ui_show_main_view()` sets `s_view` and re-renders
+through `rebuild_grid()`. Because every caller of `rebuild_grid()` (language
+change, device edit, settings save) re-renders the *current* view, new views
+need no extra wiring — but anything cached across a rebuild must be cleared at
+the top of `rebuild_grid()` or it will point at freed objects.
+
+Rooms are **discovered, not authored**: `room_sync_from_devices()` adds a
+`Room` for each distinct `Device.room` string on every rebuild, and
+`/rooms.json` only persists what a room adds on top (icon, climate topic). The
+name is the join key — for `/api/rooms` too, which matches by name rather than
+index because the list is rebuilt from devices on every boot.
+
+A room's `climate_topic` is subscribed in `reconnect_mqtt()`, so **changing one
+needs a restart** to take effect; the portal says so. Climate messages are only
+matched after every device has failed to claim the topic, so a room can never
+shadow a device.
+
+Settings splits the content area again: a 116 px tab sidebar (`UI_SIDEBAR_W`,
+built once by `build_settings_sidebar()`) and a `UI_SETTINGS_W` (312 px) body
+that `build_settings_screen()` re-renders per tab. The keyboard is parented to
+the *screen*, not to `set_container`, so it can span the full width over the
+rail and sidebar — which is why `build_settings_screen()` deletes it explicitly
+rather than relying on `lv_obj_clean()`.
+
+**Never delete the object that is dispatching the event you are handling** —
+LVGL keeps walking it after the callback returns. Hide it and rebuild later
+(`ui_device_manager.cpp`'s inline rename), or defer the teardown with
+`lv_async_call()` (the schedule delete, and any path that calls
+`rebuild_grid()` from inside a widget's own callback).
+
+Sub-screens (devices, scenes editor) are still real LVGL
+screens and follow a `build_*` / `cleanup_*` pairing — sub-screens are destroyed to
 reclaim LVGL heap before another is created. If you add a screen, add its
 cleanup and call it, or the panel will run out of heap after enough navigation.
 
@@ -128,14 +189,19 @@ text colours:
   amplitude, wider than the ramp). Depth comes from `bg_opa < 100 %` letting the
   wallpaper read through instead.
 - **Keep R = G** in surface and text colours. The panel's blue subpixel is
-  dimmest, so any R > G tilts visibly green at low brightness.
+  dimmest, so it gets crushed at surface brightness and what survives is R plus
+  any excess G — so a ramp with G above R tilts visibly green. The G byte is
+  the knob: if a trace of green shows, lower it.
 - **`CLR_HEX_TEXT_LOW` is the contrast floor** — it carries 12 px labels and is
   tuned to clear 4.5:1 against the lightest background each of them can land on,
   including a translucent surface over a bright user wallpaper. Lowering it, or
   thinning a scrim underneath it, breaks that.
 
 `lv_obj_set_style_transform_angle` is unusable on this target — it crashes
-rather than degrading. Animate with shadow/opacity instead.
+rather than degrading, and LVGL 8 has no 3D transform at all. Animate with
+shadow, opacity or height instead; the flip clock in `ui_screensaver.cpp` shows
+the pattern (height 0 → full plus a fade, 450 ms `lv_anim_path_ease_out`,
+standing in for a card rotation).
 
 ## Web portal
 

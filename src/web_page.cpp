@@ -569,6 +569,20 @@ const char index_html[] PROGMEM = R"rawliteral(
                 </button>
             </div>
 
+            <!-- Rooms -->
+            <div class="mb-6 bg-slate-900/40 border border-slate-700/60 rounded-xl p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l9-9 9 9M5 10v10h14V10" /></svg>
+                        Rooms
+                        <span class="text-[11px] font-normal text-slate-500">&mdash; created automatically from the Room field below</span>
+                    </h3>
+                    <button onclick="saveRoomsAPI()" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-primary/50 text-slate-200 text-xs font-medium py-1.5 px-4 rounded-lg transition-all">Save Rooms</button>
+                </div>
+                <div id="rooms-list" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+                <p class="mt-3 text-[11px] text-slate-500">Climate topic is optional. Publish <code class="text-slate-400">{"t":26.5,"h":58}</code> (or <code class="text-slate-400">temperature</code>/<code class="text-slate-400">humidity</code>, or a bare number for temperature) and the room card shows it. Restart the panel after changing a topic so it re-subscribes.</p>
+            </div>
+
             <!-- Device Search -->
             <div class="mb-4">
                 <input type="text" id="device-search" placeholder="Search devices by name, room, or topic..." oninput="filterDevices()" class="w-full bg-slate-800/60 border border-slate-700/50 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-all">
@@ -803,6 +817,18 @@ const char index_html[] PROGMEM = R"rawliteral(
     let devices = [];
     const MAX_DEVICES = 100;
     
+    const DEV_TYPE_OPTIONS = [
+    
+        { value: 0, text: 'Switch (on/off)' },
+    
+        { value: 1, text: 'Dimmer (0-100%)' },
+    
+        { value: 2, text: 'Fan (speed 0-3)' },
+    
+        { value: 3, text: 'AC (18-30 C)' }
+    
+    ];
+    
     const ICON_OPTIONS = [
         { value: 0, text: "Lamp", svg: '<path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />' },
         { value: 1, text: "Ceiling Fan", svg: '<path stroke-linecap="round" stroke-linejoin="round" d="M14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM12 10Q8 9 5 4M14 12Q15 8 20 5M12 14Q16 15 19 20M10 12Q9 16 4 19" />' },
@@ -907,6 +933,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             document.getElementById('web_pass').value = data.web_pass || 'admin';
             devices = data.devices || [];
             renderDevices();
+            loadRoomsAPI(); // rooms come from their own endpoint
             // Sync lang switcher with saved config
             if (data.lang) initLangButtons(data.lang);
             if (data.ss_timeout) {
@@ -1032,6 +1059,56 @@ const char index_html[] PROGMEM = R"rawliteral(
         showToast('Renamed "' + oldName + '" -> "' + trimmed + '" (' + count + ' devices)');
     }
 
+    let ROOMS = [];
+
+    function renderRooms() {
+        const list = document.getElementById('rooms-list');
+        if (!list) return;
+        if (!ROOMS.length) {
+            list.innerHTML = '<p class="text-xs text-slate-500 col-span-full">No rooms yet &mdash; give a device a Room name and save.</p>';
+            return;
+        }
+        // "Auto" keeps the firmware picking the icon from whatever devices the
+        // room holds, which is the default and usually the right answer.
+        const iconOpts = [{ value: -1, text: 'Auto' }].concat(ICON_OPTIONS.map(o => ({ value: o.value, text: o.text })));
+        list.innerHTML = ROOMS.map((rm, i) => `
+            <div class="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-slate-100">${escHtml(rm.name)}</span>
+                    <span class="text-[11px] text-slate-500">${rm.devices} device${rm.devices == 1 ? '' : 's'}${rm.climate_valid ? ` &middot; ${rm.temp.toFixed(1)}&deg; ${rm.hum}%` : ''}</span>
+                </div>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Icon</label>
+                <select class="w-full mb-2 bg-slate-900/40 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-primary"
+                    onchange="ROOMS[${i}].icon_type = parseInt(this.value)">
+                    ${iconOpts.map(o => `<option value="${o.value}" ${(rm.icon_type == null ? -1 : rm.icon_type) == o.value ? 'selected' : ''}>${o.text}</option>`).join('')}
+                </select>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Climate Topic</label>
+                <input type="text" value="${escHtml(rm.climate_topic || '')}" onchange="ROOMS[${i}].climate_topic = this.value"
+                    placeholder="Optional: home/living/climate"
+                    class="w-full bg-slate-900/40 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-300 font-mono focus:outline-none focus:border-primary placeholder-slate-600">
+            </div>`).join('');
+    }
+
+    async function loadRoomsAPI() {
+        try {
+            const r = await fetch('/api/rooms');
+            if (!r.ok) return;
+            ROOMS = (await r.json()).rooms || [];
+            renderRooms();
+        } catch (e) { console.error('rooms load', e); }
+    }
+
+    async function saveRoomsAPI() {
+        try {
+            const r = await fetch('/api/rooms', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rooms: ROOMS })
+            });
+            showToast(r.ok ? 'Rooms saved. Restart the panel to re-subscribe.' : 'Save failed', !r.ok);
+        } catch (e) { showToast('Save failed', true); }
+    }
+
     function renderDevices() {
         const list = document.getElementById('devices-list');
         list.innerHTML = '';
@@ -1115,6 +1192,23 @@ const char index_html[] PROGMEM = R"rawliteral(
                         
                         <div>
                             <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7" /></svg>
+                                Control Type
+                            </label>
+                            <div class="relative">
+                                <select class="w-full bg-slate-900/40 border border-slate-700/80 rounded-lg px-4 py-2.5 text-sm text-slate-200 appearance-none focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary cursor-pointer shadow-inner"
+                                    onchange="updateDevice(${index}, 'dev_type', parseInt(this.value))">
+                                    ${DEV_TYPE_OPTIONS.map(o => `<option value="${o.value}" ${(dev.dev_type || 0) == o.value ? 'selected' : ''}>${o.text}</option>`).join('')}
+                                </select>
+                                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+                                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </div>
+                            </div>
+                            <p class="mt-1.5 text-[11px] text-slate-500">Dimmer, Fan and AC send their level on the Dimmer Topic: 0-100, speed 0-3, or 18-30&deg;C.</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 outline-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                 Device Icon
                             </label>
@@ -1187,6 +1281,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             state_topic: "homebridge//stat",
             cmnd_topic: "homebridge//set",
             dimmer_topic: "",
+            dev_type: 0,
             icon_type: 2
         });
         // Scroll to bottom after state update

@@ -5,6 +5,7 @@
 #include "../wifi_manager.h"
 #include "extra/libs/qrcode/lv_qrcode.h"
 #include "ui_helpers.h"
+#include "ui_nav_rail.h" // ui_nav_rail_refresh_logo() after a name change
 #include "ui_screens.h"
 #include <LittleFS.h>
 #include <LovyanGFX.hpp>
@@ -25,6 +26,113 @@ extern lv_obj_t *kb;
 
 // Forward declare brightness slider callback
 void brightness_slider_event_cb(lv_event_t *e);
+
+// ── Settings tabs ───────────────────────────────────────
+// Four destinations down a 116 px sidebar, replacing the row of pills that
+// used to share the header with the back button. The header only has room for
+// a title and Save at 38 px, and the pills were how Devices, Scenes and
+// Schedules were reached — those are rail destinations and sidebar rows now.
+enum SettingsTab {
+  SET_TAB_PORTAL = 0,
+  SET_TAB_DISPLAY,
+  SET_TAB_DEVICES,
+  SET_TAB_SYSTEM,
+  SET_TAB_COUNT
+};
+static int s_settings_tab = SET_TAB_PORTAL;
+static lv_obj_t *s_tab_btns[SET_TAB_COUNT] = {NULL};
+static lv_obj_t *s_tab_lbls[SET_TAB_COUNT] = {NULL};
+
+static const char *settings_tab_name(int tab) {
+  switch (tab) {
+  case SET_TAB_PORTAL:  return L(L_WEB_PORTAL);
+  case SET_TAB_DISPLAY: return L(L_DISPLAY);
+  case SET_TAB_DEVICES: return L(L_DEVICES);
+  default:              return L(L_SYSTEM);
+  }
+}
+
+// Repaints the selected row. Same treatment as the nav rail: an accent tint
+// rather than a solid fill, so a selected tab never reads like a lit device.
+static void settings_tab_paint() {
+  for (int i = 0; i < SET_TAB_COUNT; i++) {
+    if (!s_tab_btns[i]) continue;
+    const bool on = (i == s_settings_tab);
+    lv_obj_set_style_bg_opa(s_tab_btns[i], on ? (lv_opa_t)31 : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_color(
+        s_tab_lbls[i],
+        lv_color_hex(on ? CLR_HEX_ACCENT : CLR_HEX_TEXT_LOW), 0);
+  }
+}
+
+static void settings_tab_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  s_settings_tab = (int)(intptr_t)lv_event_get_user_data(e);
+  settings_tab_paint();
+  build_settings_screen();
+}
+
+// The sidebar is built once with the screen, so unlike the tab bodies it is
+// not re-created on a language switch and its labels would keep whatever
+// language was active at boot.
+void ui_settings_refresh_chrome() {
+  for (int i = 0; i < SET_TAB_COUNT; i++)
+    if (s_tab_lbls[i]) {
+      static const char *icons[SET_TAB_COUNT] = {
+          LV_SYMBOL_WIFI, LV_SYMBOL_IMAGE, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS};
+      lv_label_set_text_fmt(s_tab_lbls[i], "%s  %s", icons[i],
+                            settings_tab_name(i));
+    }
+}
+
+void build_settings_sidebar(lv_obj_t *screen) {
+  lv_obj_t *bar = lv_obj_create(screen);
+  lv_obj_set_size(bar, UI_SIDEBAR_W, UI_CONTENT_H);
+  lv_obj_align(bar, LV_ALIGN_BOTTOM_LEFT, UI_RAIL_W, 0);
+  lv_obj_set_style_bg_color(bar, lv_color_hex(CLR_HEX_SURFACE_0), 0);
+  lv_obj_set_style_bg_opa(bar, LV_OPA_70, 0);
+  lv_obj_set_style_border_color(bar, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_opa(bar, LV_OPA_60, 0);
+  lv_obj_set_style_border_width(bar, 1, 0);
+  lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_RIGHT, 0);
+  lv_obj_set_style_radius(bar, 0, 0);
+  lv_obj_set_style_shadow_width(bar, 0, 0);
+  lv_obj_set_style_pad_all(bar, 8, 0);
+  lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+  static const char *icons[SET_TAB_COUNT] = {
+      LV_SYMBOL_WIFI,     // portal — reached over the network
+      LV_SYMBOL_IMAGE,    // display
+      LV_SYMBOL_LIST,     // devices
+      LV_SYMBOL_SETTINGS, // system
+  };
+
+  for (int i = 0; i < SET_TAB_COUNT; i++) {
+    lv_obj_t *btn = lv_btn_create(bar);
+    lv_obj_set_size(btn, UI_SIDEBAR_W - 16, 30);
+    lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, i * 34);
+    lv_obj_set_style_radius(btn, 8, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_HEX_ACCENT), 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(btn, (lv_opa_t)56, LV_STATE_PRESSED);
+    lv_obj_set_style_pad_all(btn, 0, 0);
+    lv_obj_add_event_cb(btn, settings_tab_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)i);
+
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_label_set_text_fmt(lbl, "%s  %s", icons[i], settings_tab_name(i));
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(lbl, UI_SIDEBAR_W - 26);
+    lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 8, 0);
+
+    s_tab_btns[i] = btn;
+    s_tab_lbls[i] = lbl;
+  }
+  settings_tab_paint();
+}
 
 // ── Wallpaper preset thumbnail cache ─────────────────────
 // Decoded once on first Settings open and reused across rebuilds. Buffers
@@ -80,26 +188,37 @@ void ta_wifi_event_cb(lv_event_t *e) {
 }
 
 void build_wifi_setup_screen() {
+  if (kb) {
+    lv_obj_del(kb);
+    kb = NULL;
+  }
   lv_obj_clean(set_container);
 
-  // Glass card for WiFi form
-  lv_obj_t *card = ui_create_glass_card(set_container, 440, 240);
+  const int card_w = UI_SETTINGS_W - 20;
+  lv_obj_t *card = ui_create_glass_card(set_container, card_w, 190);
   lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_set_style_pad_all(card, 12, 0);
 
   lv_obj_t *lbl_title = lv_label_create(card);
   lv_label_set_text_fmt(lbl_title, LV_SYMBOL_WIFI "  %s", L(L_WIFI_SETUP));
   lv_obj_set_style_text_color(lbl_title, CLR_PRIMARY, 0);
-  lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_14, 0);
   lv_obj_align(lbl_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
-  ta_ssid = ui_create_textarea(card, 400, L(L_WIFI_SSID), wifi_ssid.c_str(),
-                               ta_wifi_event_cb);
-  lv_obj_align(ta_ssid, LV_ALIGN_TOP_MID, 0, 32);
+  ta_ssid = ui_create_textarea(card, card_w - 24, L(L_WIFI_SSID),
+                               wifi_ssid.c_str(), ta_wifi_event_cb);
+  lv_obj_align(ta_ssid, LV_ALIGN_TOP_MID, 0, 30);
 
-  ta_pass = ui_create_textarea(card, 400, L(L_WIFI_PASSWORD),
+  ta_pass = ui_create_textarea(card, card_w - 24, L(L_WIFI_PASSWORD),
                                wifi_pass.c_str(), ta_wifi_event_cb);
-  lv_obj_align(ta_pass, LV_ALIGN_TOP_MID, 0, 84);
+  lv_obj_align(ta_pass, LV_ALIGN_TOP_MID, 0, 82);
   lv_textarea_set_password_mode(ta_pass, false);
+
+  lv_obj_t *hint = lv_label_create(card);
+  lv_label_set_text(hint, L(L_WEB_SAVE_RESTART));
+  lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(hint, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, 0);
 
   // Hidden placeholders
   ta_mqtt_srv = NULL;
@@ -107,7 +226,11 @@ void build_wifi_setup_screen() {
   ta_mqtt_pwd = NULL;
   ta_city = NULL;
 
-  kb = lv_keyboard_create(set_container);
+  // The keyboard belongs to the screen, not to the 312 px content area — it
+  // needs the full width to be typeable, and it has to draw over the rail and
+  // the sidebar rather than be squeezed between them. build_settings_screen()
+  // deletes it, which is why it is tracked in the shared `kb` pointer.
+  kb = lv_keyboard_create(lv_obj_get_screen(set_container));
   ui_style_keyboard(kb);
   lv_obj_set_size(kb, SCREEN_WIDTH, 136);
   lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -120,439 +243,365 @@ void btn_wifi_config_cb(lv_event_t *e) {
   }
 }
 
-void build_settings_screen() {
-  if (set_container == NULL)
-    return;
-  lv_obj_clean(set_container);
+// ── Content building blocks ─────────────────────────────
+// The content area is 312 px wide now that the rail and the tab sidebar have
+// taken their columns, so settings are a scrolling column of rows rather than
+// the 444 px cards that fitted when this screen owned the whole display.
 
-  // ── TabView ────────────────────────────────────────────
-  lv_obj_t *settings_tabview = lv_tabview_create(set_container, LV_DIR_TOP, 40);
-  lv_obj_set_size(settings_tabview, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_opa(settings_tabview, LV_OPA_TRANSP, 0);
+static lv_obj_t *settings_page(lv_obj_t *parent) {
+  lv_obj_t *page = lv_obj_create(parent);
+  lv_obj_set_size(page, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_style_bg_opa(page, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(page, 0, 0);
+  lv_obj_set_style_pad_all(page, 10, 0);
+  lv_obj_set_style_pad_row(page, 6, 0);
+  lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(page, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                        LV_FLEX_ALIGN_START);
+  lv_obj_set_scroll_dir(page, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_AUTO);
+  ui_style_scrollbar(page);
+  return page;
+}
 
-  lv_obj_t *tab_content = lv_tabview_get_content(settings_tabview);
-  lv_obj_set_style_bg_opa(tab_content, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(tab_content, 0, 0);
+// One labelled setting. Returns the row so the caller can hang its control off
+// the right edge with LV_ALIGN_RIGHT_MID.
+static lv_obj_t *settings_row(lv_obj_t *page, const char *text, int h = 36) {
+  lv_obj_t *row = lv_obj_create(page);
+  lv_obj_set_size(row, LV_PCT(100), h);
+  lv_obj_set_style_bg_color(row, lv_color_hex(CLR_HEX_SURFACE_1), 0);
+  lv_obj_set_style_bg_grad_dir(row, LV_GRAD_DIR_NONE, 0);
+  lv_obj_set_style_bg_opa(row, LV_OPA_90, 0);
+  lv_obj_set_style_border_color(row, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_width(row, 1, 0);
+  lv_obj_set_style_border_opa(row, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(row, 10, 0);
+  lv_obj_set_style_shadow_width(row, 0, 0);
+  lv_obj_set_style_pad_all(row, 8, 0);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Tab Buttons — segmented pill bar
-  lv_obj_t *tab_btns = lv_tabview_get_tab_btns(settings_tabview);
-  lv_obj_set_style_bg_color(tab_btns, lv_color_hex(CLR_HEX_PILL_BG), 0);
-  lv_obj_set_style_bg_opa(tab_btns, LV_OPA_COVER, 0);
-  lv_obj_set_style_radius(tab_btns, 12, 0);
-  // Token ramp, not CLR_TEXT_DIM — the bar's fill is CLR_HEX_PILL_BG in both
-  // themes, so the theme-aware grey went unreadable against it in light mode.
-  lv_obj_set_style_text_color(tab_btns, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_set_style_text_font(tab_btns, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_border_side(tab_btns, LV_BORDER_SIDE_NONE, LV_PART_ITEMS);
-  lv_style_selector_t checked = (lv_style_selector_t)LV_PART_ITEMS |
-                                (lv_style_selector_t)LV_STATE_CHECKED;
-  lv_obj_set_style_text_color(tab_btns, lv_color_hex(CLR_HEX_ON_ACCENT), checked);
-  lv_obj_set_style_bg_color(tab_btns, CLR_PRIMARY, checked);
-  lv_obj_set_style_bg_opa(tab_btns, LV_OPA_COVER, checked);
-  lv_obj_set_style_radius(tab_btns, 10, checked);
-  lv_obj_set_style_pad_ver(tab_btns, 4, 0);
+  if (text) {
+    lv_obj_t *lbl = lv_label_create(row);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(lbl, 100); // leaves 168 px + an 8 px gap for the control
+    lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+  }
+  return row;
+}
 
-  // Create Tabs
-  lv_obj_t *tab_web = lv_tabview_add_tab(settings_tabview, L(L_WEB_PORTAL));
-  lv_obj_t *tab_dev = lv_tabview_add_tab(settings_tabview, L(L_PANEL_SETTINGS));
+// Read-only status line: coloured dot, name, value.
+static void settings_status_row(lv_obj_t *page, const char *name,
+                                const char *value, lv_color_t dot_color) {
+  lv_obj_t *row = settings_row(page, NULL);
+  lv_obj_t *dot = ui_create_dot(row, 7, dot_color);
+  lv_obj_align(dot, LV_ALIGN_LEFT_MID, 0, 0);
 
-  // Clean tab padding
-  lv_obj_set_scrollbar_mode(tab_web, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_style_pad_all(tab_web, 0, 0);
-  lv_obj_set_style_border_width(tab_web, 0, 0);
-  lv_obj_set_scrollbar_mode(tab_dev, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_style_pad_all(tab_dev, 0, 0);
-  lv_obj_set_style_border_width(tab_dev, 0, 0);
+  lv_obj_t *lbl = lv_label_create(row);
+  lv_label_set_text(lbl, name);
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
+  lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 14, 0);
 
-  // ╔═══════════════════════════════════════════╗
-  // ║         TAB 1 — Web Portal                ║
-  // ╚═══════════════════════════════════════════╝
+  lv_obj_t *val = lv_label_create(row);
+  lv_label_set_text(val, value);
+  lv_obj_set_style_text_font(val, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(val, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_label_set_long_mode(val, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(val, 150);
+  lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_align(val, LV_ALIGN_RIGHT_MID, 0, 0);
+}
+
+// Used / total with a fill bar. The bar turns amber then red as it fills:
+// these are the numbers you look at when the panel has started misbehaving,
+// and "82 %" means nothing until you can see it against the whole.
+static void settings_meter_row(lv_obj_t *page, const char *name, size_t used,
+                               size_t total, bool as_kb) {
+  lv_obj_t *row = settings_row(page, NULL, 46);
+  const int pct = total ? (int)(((uint64_t)used * 100) / total) : 0;
+
+  lv_obj_t *lbl = lv_label_create(row);
+  lv_label_set_text(lbl, name);
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
+  lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, 0);
+
+  lv_obj_t *val = lv_label_create(row);
+  if (as_kb)
+    lv_label_set_text_fmt(val, "%u / %u KB  %d%%", (unsigned)(used / 1024),
+                          (unsigned)(total / 1024), pct);
+  else
+    lv_label_set_text_fmt(val, "%.1f / %.1f MB  %d%%", used / 1048576.0f,
+                          total / 1048576.0f, pct);
+  lv_obj_set_style_text_font(val, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(val, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_obj_align(val, LV_ALIGN_TOP_RIGHT, 0, 0);
+
+  lv_obj_t *bar = lv_bar_create(row);
+  lv_obj_set_size(bar, UI_SETTINGS_W - 40, 6);
+  lv_obj_align(bar, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+  lv_bar_set_range(bar, 0, 100);
+  lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(bar, lv_color_hex(CLR_HEX_SURFACE_2), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_radius(bar, 3, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(bar,
+                            lv_color_hex(pct >= 90   ? CLR_HEX_DANGER
+                                         : pct >= 80 ? CLR_HEX_ACCENT_HI
+                                                     : CLR_HEX_ACCENT),
+                            LV_PART_INDICATOR);
+  lv_obj_set_style_radius(bar, 3, LV_PART_INDICATOR);
+}
+
+// A full-width row that acts as a button and opens something else.
+static void settings_link_row(lv_obj_t *page, const char *glyph,
+                              const char *text, lv_event_cb_t cb) {
+  lv_obj_t *row = settings_row(page, NULL);
+  lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_border_color(row, lv_color_hex(CLR_HEX_ACCENT),
+                                LV_STATE_PRESSED);
+  lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, NULL);
+
+  lv_obj_t *lbl = lv_label_create(row);
+  lv_label_set_text_fmt(lbl, "%s  %s", glyph, text);
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+
+  lv_obj_t *chev = lv_label_create(row);
+  lv_label_set_text(chev, LV_SYMBOL_RIGHT);
+  lv_obj_set_style_text_font(chev, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(chev, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_obj_align(chev, LV_ALIGN_RIGHT_MID, 0, 0);
+}
+
+// ╔═══════════════════════════════════════════╗
+// ║  TAB — Web portal                         ║
+// ╚═══════════════════════════════════════════╝
+static void build_tab_portal(lv_obj_t *page) {
   if (isWifiConnected) {
-    // Glass card for QR + info
-    lv_obj_t *qr_card = ui_create_glass_card(tab_web, 440, 210);
-    lv_obj_align(qr_card, LV_ALIGN_TOP_MID, 0, 4);
+    String url = "http://" + WiFi.localIP().toString();
 
-    // QR code — left side
-    String ipStr = WiFi.localIP().toString();
-    String url = "http://" + ipStr;
-    lv_obj_t *qr =
-        lv_qrcode_create(qr_card, 130, lv_color_black(), lv_color_white());
+    lv_obj_t *card = lv_obj_create(page);
+    lv_obj_set_size(card, LV_PCT(100), 214);
+    ui_style_surface(card, UI_CARD_RADIUS);
+    lv_obj_set_style_pad_all(card, 12, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    // QR stacked above the text rather than beside it — 292 px will not hold
+    // a 120 px code and a readable URL side by side.
+    lv_obj_t *qr = lv_qrcode_create(card, 120, lv_color_black(), lv_color_white());
     lv_qrcode_update(qr, url.c_str(), url.length());
-    lv_obj_align(qr, LV_ALIGN_LEFT_MID, 16, 0);
+    lv_obj_align(qr, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_border_color(qr, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_width(qr, 3, 0);
     lv_obj_set_style_radius(qr, 8, 0);
 
-    // Info — right side
-    lv_obj_t *lbl_scan = lv_label_create(qr_card);
-    lv_label_set_text(lbl_scan, L(L_SCAN_QR));
-    lv_obj_set_style_text_color(lbl_scan, lv_color_hex(CLR_HEX_TEXT_HI), 0);
-    lv_obj_set_style_text_font(lbl_scan, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_align(lbl_scan, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(lbl_scan, LV_ALIGN_RIGHT_MID, -70, -30);
-
-    // Status dot + Connected label
-    lv_obj_t *dot = lv_obj_create(qr_card);
-    lv_obj_set_size(dot, 10, 10);
-    lv_obj_set_style_bg_color(dot, lv_color_hex(CLR_HEX_OK), 0);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(dot, 0, 0);
-    lv_obj_set_style_shadow_color(dot, lv_color_hex(CLR_HEX_OK), 0);
-    lv_obj_set_style_shadow_width(dot, 8, 0);
-    lv_obj_set_style_shadow_opa(dot, LV_OPA_60, 0);
-
-    lv_obj_t *lbl_status = lv_label_create(qr_card);
-    lv_label_set_text(lbl_status, L(L_CONNECTED));
-    lv_obj_set_style_text_color(lbl_status, lv_color_hex(CLR_HEX_OK), 0);
-    lv_obj_set_style_text_font(lbl_status, &lv_font_montserrat_12, 0);
-    lv_obj_align(lbl_status, LV_ALIGN_RIGHT_MID, -88, 18);
-
-    // Anchor the dot to the label instead of giving it its own right-aligned
-    // offset. Both were pinned to the card's right edge, so the gap between
-    // them was whatever the translated string left over — "Connected" is wide
-    // enough to close it to a pixel, and a longer word would overlap the dot.
-    lv_obj_update_layout(qr_card);
-    lv_obj_align_to(dot, lbl_status, LV_ALIGN_OUT_LEFT_MID, -8, 0);
-
-    // IP address — amber accent
-    lv_obj_t *lbl_ip = lv_label_create(qr_card);
+    lv_obj_t *lbl_ip = lv_label_create(card);
     lv_label_set_text(lbl_ip, url.c_str());
     lv_obj_set_style_text_color(lbl_ip, CLR_PRIMARY, 0);
-    lv_obj_set_style_text_font(lbl_ip, &lv_font_montserrat_14, 0);
-    lv_obj_align(lbl_ip, LV_ALIGN_RIGHT_MID, -60, 48);
+    lv_obj_set_style_text_font(lbl_ip, &lv_font_montserrat_16, 0);
+    lv_obj_align(lbl_ip, LV_ALIGN_TOP_MID, 0, 132);
 
+    lv_obj_t *lbl_scan = lv_label_create(card);
+    lv_label_set_text(lbl_scan, L(L_SCAN_QR));
+    lv_obj_set_style_text_color(lbl_scan, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+    lv_obj_set_style_text_font(lbl_scan, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(lbl_scan, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(lbl_scan, UI_SETTINGS_W - 48);
+    lv_obj_align(lbl_scan, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    settings_status_row(page, "Wi-Fi", WiFi.SSID().c_str(),
+                        lv_color_hex(CLR_HEX_OK));
   } else {
-    // Disconnected state — glass card with warning
-    lv_obj_t *dc_card = ui_create_glass_card(tab_web, 440, 210);
-    lv_obj_align(dc_card, LV_ALIGN_TOP_MID, 0, 4);
-    lv_obj_set_style_border_color(dc_card, lv_color_hex(CLR_HEX_DANGER), 0);
-    lv_obj_set_style_border_opa(dc_card, LV_OPA_40, 0); // red tint, not a red frame
+    lv_obj_t *card = lv_obj_create(page);
+    lv_obj_set_size(card, LV_PCT(100), 150);
+    ui_style_surface(card, UI_CARD_RADIUS);
+    lv_obj_set_style_border_color(card, lv_color_hex(CLR_HEX_DANGER), 0);
+    lv_obj_set_style_border_opa(card, LV_OPA_40, 0); // red tint, not a red frame
+    lv_obj_set_style_pad_all(card, 12, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Red dot
-    lv_obj_t *dot = lv_obj_create(dc_card);
-    lv_obj_set_size(dot, 12, 12);
-    lv_obj_set_style_bg_color(dot, lv_color_hex(CLR_HEX_DANGER), 0);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(dot, 0, 0);
-    lv_obj_set_style_shadow_color(dot, lv_color_hex(CLR_HEX_DANGER), 0);
-    lv_obj_set_style_shadow_width(dot, 10, 0);
-    lv_obj_set_style_shadow_opa(dot, LV_OPA_50, 0);
-    lv_obj_align(dot, LV_ALIGN_TOP_MID, -50, 30);
-
-    lv_obj_t *lbl_err = lv_label_create(dc_card);
-    lv_label_set_text_fmt(lbl_err, "  %s", L(L_DISCONNECTED));
+    lv_obj_t *lbl_err = lv_label_create(card);
+    lv_label_set_text(lbl_err, L(L_DISCONNECTED));
     lv_obj_set_style_text_color(lbl_err, lv_color_hex(CLR_HEX_DANGER), 0);
     lv_obj_set_style_text_font(lbl_err, &lv_font_montserrat_16, 0);
-    lv_obj_align(lbl_err, LV_ALIGN_TOP_MID, 8, 26);
+    lv_obj_align(lbl_err, LV_ALIGN_TOP_MID, 0, 0);
 
-    lv_obj_t *lbl_msg = lv_label_create(dc_card);
+    lv_obj_t *lbl_msg = lv_label_create(card);
     lv_label_set_text(lbl_msg, L(L_WIFI_NOT_CONNECTED));
     lv_obj_set_style_text_color(lbl_msg, lv_color_hex(CLR_HEX_TEXT_MID), 0);
+    lv_obj_set_style_text_font(lbl_msg, &lv_font_montserrat_12, 0);
+    lv_label_set_long_mode(lbl_msg, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(lbl_msg, UI_SETTINGS_W - 44);
     lv_obj_set_style_text_align(lbl_msg, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(lbl_msg, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_align(lbl_msg, LV_ALIGN_CENTER, 0, 4);
 
-    // Setup WiFi button — amber pill
-    lv_obj_t *btn_wifi = lv_btn_create(dc_card);
-    lv_obj_set_size(btn_wifi, 170, 40);
-    lv_obj_align(btn_wifi, LV_ALIGN_BOTTOM_MID, 0, -16);
-    lv_obj_set_style_bg_color(btn_wifi, CLR_PRIMARY, 0);
-    lv_obj_set_style_bg_opa(btn_wifi, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(btn_wifi, 0, 0);
-    lv_obj_set_style_shadow_color(btn_wifi, CLR_PRIMARY, 0);
-    lv_obj_set_style_shadow_width(btn_wifi, 12, 0);
-    lv_obj_set_style_shadow_opa(btn_wifi, LV_OPA_40, 0);
-    lv_obj_set_style_radius(btn_wifi, 12, 0);
-    lv_obj_t *lbl_wifi = lv_label_create(btn_wifi);
-    lv_label_set_text_fmt(lbl_wifi, LV_SYMBOL_WIFI " %s", L(L_SETUP_WIFI));
-    lv_obj_set_style_text_color(lbl_wifi, lv_color_hex(CLR_HEX_ON_ACCENT), 0);
-    lv_obj_set_style_text_font(lbl_wifi, &lv_font_montserrat_14, 0);
-    lv_obj_center(lbl_wifi);
-    lv_obj_add_event_cb(btn_wifi, btn_wifi_config_cb, LV_EVENT_ALL, NULL);
+    lv_obj_t *btn_wifi = ui_create_accent_btn(card, 160, 32, "",
+                                              btn_wifi_config_cb);
+    lv_obj_align(btn_wifi, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_label_set_text_fmt(lv_obj_get_child(btn_wifi, 0), LV_SYMBOL_WIFI " %s",
+                          L(L_SETUP_WIFI));
   }
+}
 
-  // ╔═══════════════════════════════════════════╗
-  // ║       TAB 2 — Panel Settings              ║
-  // ╚═══════════════════════════════════════════╝
+// ╔═══════════════════════════════════════════╗
+// ║  TAB — Display                            ║
+// ╚═══════════════════════════════════════════╝
+// Every choice here is a segmented control rather than a dropdown. LVGL
+// parents a dropdown's open list to the screen and sizes it to its own
+// content, so in this 312 px column the list rendered wider than the row it
+// belonged to and spilled across the card.
+//
+// The maps are static because lv_btnmatrix stores the pointer instead of
+// copying. That is safe across a language switch: build_settings_screen() runs
+// again after lang_load(), which refills these with the new strings before any
+// widget can read them.
+#define SEG_CTRL_W 168
+// Design calls for 21 px; 22 keeps the row an even number of pixels tall
+// around the label without dropping below the spec's touch height.
+#define SEG_CTRL_H 22
 
-  // ── Glass Card 1: Display ────────────────────
-  lv_obj_t *card_disp = ui_create_glass_card(tab_dev, 444, 98);
-  lv_obj_align(card_disp, LV_ALIGN_TOP_MID, 0, 4);
-  lv_obj_set_style_pad_all(card_disp, 12, 0);
-
+static void build_tab_display(lv_obj_t *page) {
   // Brightness
-  lv_obj_t *br_label = lv_label_create(card_disp);
-  lv_label_set_text(br_label, L(L_BRIGHTNESS));
-  lv_obj_set_style_text_color(br_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_set_style_text_font(br_label, &lv_font_montserrat_12, 0);
-  lv_obj_align(br_label, LV_ALIGN_TOP_LEFT, 2, 0);
-
-  lv_obj_t *slider = lv_slider_create(card_disp);
-  lv_obj_set_width(slider, 130);
+  lv_obj_t *row_br = settings_row(page, L(L_BRIGHTNESS));
+  lv_obj_t *slider = lv_slider_create(row_br);
+  lv_obj_set_size(slider, SEG_CTRL_W, 8);
   ui_style_slider(slider);
   lv_slider_set_range(slider, 10, 255);
   lv_slider_set_value(slider, displayBrightness, LV_ANIM_OFF);
-  lv_obj_align(slider, LV_ALIGN_BOTTOM_LEFT, 2, -6);
+  lv_obj_align(slider, LV_ALIGN_RIGHT_MID, 0, 0);
   lv_obj_add_event_cb(slider, brightness_slider_event_cb, LV_EVENT_ALL, NULL);
 
-  // Time Format
-  lv_obj_t *tf_label = lv_label_create(card_disp);
-  lv_label_set_text(tf_label, L(L_TIME_FORMAT));
-  lv_obj_set_style_text_color(tf_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_set_style_text_font(tf_label, &lv_font_montserrat_12, 0);
-  lv_obj_align(tf_label, LV_ALIGN_TOP_MID, 0, 0);
-
-  lv_obj_t *dd_tf = lv_dropdown_create(card_disp);
-  static char tf_opts[48];
-  snprintf(tf_opts, sizeof(tf_opts), "%s\n%s", L(L_TIME_12H), L(L_TIME_24H));
-  lv_dropdown_set_options(dd_tf, tf_opts);
-  lv_dropdown_set_selected(dd_tf, use24HourFormat ? 1 : 0);
-  lv_obj_set_width(dd_tf, 110);
-  lv_obj_align(dd_tf, LV_ALIGN_BOTTOM_MID, 0, -4);
-  ui_style_dropdown(dd_tf);
-  lv_obj_add_event_cb(
-      dd_tf,
+  // Time format
+  static const char *map_tf[4];
+  map_tf[0] = L(L_TIME_12H); map_tf[1] = L(L_TIME_24H); map_tf[2] = "";
+  lv_obj_t *row_tf = settings_row(page, L(L_TIME_FORMAT));
+  lv_obj_t *seg_tf = ui_create_segmented(
+      row_tf, map_tf, SEG_CTRL_W, SEG_CTRL_H, use24HourFormat ? 1 : 0,
       [](lv_event_t *e) {
-        if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
-          lv_obj_t *dd = lv_event_get_target(e);
-          use24HourFormat = (lv_dropdown_get_selected(dd) == 1);
-          Preferences p; p.begin(NVS_NAMESPACE, false);
-          p.putBool("time_24h", use24HourFormat);
-          p.end();
-        }
-      },
-      LV_EVENT_ALL, NULL);
+        use24HourFormat =
+            (lv_btnmatrix_get_selected_btn(lv_event_get_target(e)) == 1);
+        Preferences p; p.begin(NVS_NAMESPACE, false);
+        p.putBool("time_24h", use24HourFormat);
+        p.end();
+      });
+  lv_obj_align(seg_tf, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  // Screensaver Style
-  lv_obj_t *ss_label = lv_label_create(card_disp);
-  lv_label_set_text(ss_label, L(L_SCREENSAVER));
-  lv_obj_set_style_text_color(ss_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_set_style_text_font(ss_label, &lv_font_montserrat_12, 0);
-  lv_obj_align(ss_label, LV_ALIGN_TOP_RIGHT, -4, 0);
-
-  lv_obj_t *dd_ss = lv_dropdown_create(card_disp);
-  static char ss_opts[64];
-  snprintf(ss_opts, sizeof(ss_opts), "%s\n%s\n%s", L(L_FLIP_CLOCK), L(L_MINIMAL), L(L_SCREEN_OFF));
-  lv_dropdown_set_options(dd_ss, ss_opts);
-  lv_dropdown_set_selected(dd_ss, screensaverStyle);
-  lv_obj_set_width(dd_ss, 120);
-  lv_obj_align(dd_ss, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
-  ui_style_dropdown(dd_ss);
-  lv_obj_add_event_cb(
-      dd_ss,
+  // Language
+  static const char *map_lang[LANG_OPTIONS_COUNT + 1];
+  for (int i = 0; i < LANG_OPTIONS_COUNT; i++) map_lang[i] = lang_names[i];
+  map_lang[LANG_OPTIONS_COUNT] = "";
+  int lang_sel = 0;
+  for (int i = 0; i < LANG_OPTIONS_COUNT; i++)
+    if (strcmp(currentLang, lang_codes[i]) == 0) { lang_sel = i; break; }
+  lv_obj_t *row_lang = settings_row(page, L(L_LANGUAGE));
+  lv_obj_t *seg_lang = ui_create_segmented(
+      row_lang, map_lang, SEG_CTRL_W, SEG_CTRL_H, lang_sel,
       [](lv_event_t *e) {
-        if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
-          lv_obj_t *dd = lv_event_get_target(e);
-          screensaverStyle = lv_dropdown_get_selected(dd);
-          Preferences p; p.begin(NVS_NAMESPACE, false);
-          p.putInt("ss_style", screensaverStyle);
-          p.end();
-        }
-      },
-      LV_EVENT_ALL, NULL);
+        int sel = lv_btnmatrix_get_selected_btn(lv_event_get_target(e));
+        if (sel < 0 || sel >= LANG_OPTIONS_COUNT) return;
+        strncpy(currentLang, lang_codes[sel], sizeof(currentLang) - 1);
+        currentLang[sizeof(currentLang) - 1] = '\0';
+        Preferences p; p.begin(NVS_NAMESPACE, false);
+        p.putString("lang", currentLang);
+        p.end();
+        lang_load(currentLang);
+        ui_refresh_lang();       // Home, header, rail and the sidebar tabs
+        build_settings_screen(); // this tab, in the new language
+      });
+  lv_obj_align(seg_lang, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  // ── Glass Card 2: System ─────────────────────
-  lv_obj_t *card_sys = ui_create_glass_card(tab_dev, 444, 98);
-  lv_obj_align(card_sys, LV_ALIGN_TOP_MID, 0, 108);
-  lv_obj_set_style_pad_all(card_sys, 12, 0);
-
-  // Timeout
-  lv_obj_t *to_label = lv_label_create(card_sys);
-  lv_label_set_text(to_label, L(L_SCREEN_TIMEOUT));
-  lv_obj_set_style_text_color(to_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_set_style_text_font(to_label, &lv_font_montserrat_12, 0);
-  lv_obj_align(to_label, LV_ALIGN_TOP_LEFT, 2, 0);
-
-  lv_obj_t *dd_to = lv_dropdown_create(card_sys);
-  static char to_opts[64];
-  snprintf(to_opts, sizeof(to_opts), "%s\n%s\n%s\n%s", L(L_1_MIN), L(L_2_MIN), L(L_5_MIN), L(L_NEVER));
-  lv_dropdown_set_options(dd_to, to_opts);
-  if (screensaverTimeoutMs == 60000)
-    lv_dropdown_set_selected(dd_to, 0);
-  else if (screensaverTimeoutMs == 120000)
-    lv_dropdown_set_selected(dd_to, 1);
-  else if (screensaverTimeoutMs == 300000)
-    lv_dropdown_set_selected(dd_to, 2);
-  else
-    lv_dropdown_set_selected(dd_to, 3);
-  lv_obj_set_width(dd_to, 120);
-  lv_obj_align(dd_to, LV_ALIGN_BOTTOM_LEFT, 2, -4);
-  ui_style_dropdown(dd_to);
-  lv_obj_add_event_cb(
-      dd_to,
+  // Screensaver style
+  static const char *map_ss[4];
+  map_ss[0] = L(L_FLIP_CLOCK); map_ss[1] = L(L_MINIMAL);
+  map_ss[2] = L(L_SCREEN_OFF); map_ss[3] = "";
+  lv_obj_t *row_ss = settings_row(page, L(L_SCREENSAVER));
+  lv_obj_t *seg_ss = ui_create_segmented(
+      row_ss, map_ss, SEG_CTRL_W, SEG_CTRL_H, screensaverStyle,
       [](lv_event_t *e) {
-        if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
-          lv_obj_t *dd = lv_event_get_target(e);
-          int sel = lv_dropdown_get_selected(dd);
-          if (sel == 0)
-            screensaverTimeoutMs = 60000;
-          else if (sel == 1)
-            screensaverTimeoutMs = 120000;
-          else if (sel == 2)
-            screensaverTimeoutMs = 300000;
-          else
-            screensaverTimeoutMs = 0;
-          Preferences p; p.begin(NVS_NAMESPACE, false);
-          p.putULong("ss_timeout", screensaverTimeoutMs);
-          p.end();
-        }
-      },
-      LV_EVENT_ALL, NULL);
+        screensaverStyle = lv_btnmatrix_get_selected_btn(lv_event_get_target(e));
+        Preferences p; p.begin(NVS_NAMESPACE, false);
+        p.putInt("ss_style", screensaverStyle);
+        p.end();
+        invalidate_screensaver_build(); // style changed — rebuild on next show
+      });
+  lv_obj_align(seg_ss, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  // Language dropdown — center of system card
-  lv_obj_t *lang_label = lv_label_create(card_sys);
-  lv_label_set_text(lang_label, L(L_LANGUAGE));
-  lv_obj_set_style_text_color(lang_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_set_style_text_font(lang_label, &lv_font_montserrat_12, 0);
-  lv_obj_align(lang_label, LV_ALIGN_TOP_MID, 0, 0);
-
-  lv_obj_t *dd_lang = lv_dropdown_create(card_sys);
-  // Build dropdown options: "English\nไทย"
-  static char lang_opts[64];
-  {
-    char *p = lang_opts;
-    for (int i = 0; i < LANG_OPTIONS_COUNT; i++) {
-      if (i > 0) *p++ = '\n';
-      strcpy(p, lang_names[i]);
-      p += strlen(lang_names[i]);
-    }
-    *p = '\0';
-  }
-  lv_dropdown_set_options(dd_lang, lang_opts);
-  // Select current language
-  for (int i = 0; i < LANG_OPTIONS_COUNT; i++) {
-    if (strcmp(currentLang, lang_codes[i]) == 0) {
-      lv_dropdown_set_selected(dd_lang, i);
-      break;
-    }
-  }
-  lv_obj_set_width(dd_lang, 110);
-  lv_obj_align(dd_lang, LV_ALIGN_BOTTOM_MID, 0, -4);
-  ui_style_dropdown(dd_lang);
-  lv_obj_add_event_cb(
-      dd_lang,
+  // Screen timeout
+  static const char *map_to[5];
+  map_to[0] = L(L_1_MIN); map_to[1] = L(L_2_MIN);
+  map_to[2] = L(L_5_MIN); map_to[3] = L(L_NEVER); map_to[4] = "";
+  lv_obj_t *row_to = settings_row(page, L(L_SCREEN_TIMEOUT));
+  lv_obj_t *seg_to = ui_create_segmented(
+      row_to, map_to, SEG_CTRL_W, SEG_CTRL_H,
+      screensaverTimeoutMs == 60000    ? 0
+      : screensaverTimeoutMs == 120000 ? 1
+      : screensaverTimeoutMs == 300000 ? 2
+                                       : 3,
       [](lv_event_t *e) {
-        if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
-          lv_obj_t *dd = lv_event_get_target(e);
-          int sel = lv_dropdown_get_selected(dd);
-          if (sel >= 0 && sel < LANG_OPTIONS_COUNT) {
-            strncpy(currentLang, lang_codes[sel], sizeof(currentLang) - 1);
-            currentLang[sizeof(currentLang) - 1] = '\0';
-            Preferences p; p.begin(NVS_NAMESPACE, false);
-            p.putString("lang", currentLang);
-            p.end();
-            lang_load(currentLang);
-            // Rebuild UI to apply new language
-            ui_refresh_lang();
-            build_settings_screen();
-          }
+        switch (lv_btnmatrix_get_selected_btn(lv_event_get_target(e))) {
+        case 0:  screensaverTimeoutMs = 60000; break;
+        case 1:  screensaverTimeoutMs = 120000; break;
+        case 2:  screensaverTimeoutMs = 300000; break;
+        default: screensaverTimeoutMs = 0; break;
         }
-      },
-      LV_EVENT_ALL, NULL);
+        Preferences p; p.begin(NVS_NAMESPACE, false);
+        p.putULong("ss_timeout", screensaverTimeoutMs);
+        p.end();
+      });
+  lv_obj_align(seg_to, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  // Reset Web Auth — pill button, right side
-  lv_obj_t *btn_reset = lv_btn_create(card_sys);
-  lv_obj_set_size(btn_reset, 120, 44);
-  lv_obj_align(btn_reset, LV_ALIGN_RIGHT_MID, -4, 14);
-  lv_obj_set_style_bg_color(btn_reset, lv_color_hex(CLR_HEX_PILL_BG), 0);
-  lv_obj_set_style_bg_opa(btn_reset, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_color(btn_reset, lv_color_hex(CLR_HEX_DANGER), 0);
-  lv_obj_set_style_border_width(btn_reset, 1, 0);
-  lv_obj_set_style_radius(btn_reset, 12, 0);
-  lv_obj_set_style_shadow_width(btn_reset, 0, 0);
+  // Home layout
+  static const char *map_lay[3];
+  map_lay[0] = L(L_LAYOUT_GRID); map_lay[1] = L(L_LAYOUT_LIST); map_lay[2] = "";
+  lv_obj_t *row_lay = settings_row(page, L(L_HOME_LAYOUT));
+  lv_obj_t *seg_lay = ui_create_segmented(
+      row_lay, map_lay, SEG_CTRL_W, SEG_CTRL_H, homeLayoutStyle,
+      [](lv_event_t *e) {
+        homeLayoutStyle = lv_btnmatrix_get_selected_btn(lv_event_get_target(e));
+        Preferences p; p.begin(NVS_NAMESPACE, false);
+        p.putInt("home_layout", homeLayoutStyle);
+        p.end();
+        rebuild_grid(); // apply immediately behind this screen
+      });
+  lv_obj_align(seg_lay, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  // Haptic switch — above reset button
-  lv_obj_t *haptic_label = lv_label_create(card_sys);
-  lv_label_set_text(haptic_label, L(L_HAPTIC));
-  lv_obj_set_style_text_color(haptic_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_set_style_text_font(haptic_label, &lv_font_montserrat_12, 0);
-  lv_obj_align(haptic_label, LV_ALIGN_RIGHT_MID, -100, -20);
-
-  lv_obj_t *sw_haptic = lv_switch_create(card_sys);
+  // Haptic
+  lv_obj_t *row_hap = settings_row(page, L(L_HAPTIC));
+  lv_obj_t *sw_haptic = lv_switch_create(row_hap);
   lv_obj_set_size(sw_haptic, 40, 22);
-  lv_obj_align(sw_haptic, LV_ALIGN_RIGHT_MID, -4, -20);
+  lv_obj_align(sw_haptic, LV_ALIGN_RIGHT_MID, 0, 0);
   ui_style_switch(sw_haptic);
   if (hapticEnabled) lv_obj_add_state(sw_haptic, LV_STATE_CHECKED);
-  lv_obj_add_event_cb(sw_haptic, [](lv_event_t *e) {
-    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
-      hapticEnabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
-      Preferences p; p.begin(NVS_NAMESPACE, false);
-      p.putBool("haptic", hapticEnabled);
-      p.end();
-      if (hapticEnabled) hal_haptic_buzz(); // test buzz
-    }
-  }, LV_EVENT_ALL, NULL);
-  lv_obj_t *lbl_reset = lv_label_create(btn_reset);
-  lv_label_set_text_fmt(lbl_reset, LV_SYMBOL_WARNING " %s", L(L_RESET_PASS));
-  lv_obj_set_style_text_color(lbl_reset, lv_color_hex(CLR_HEX_DANGER), 0);
-  lv_obj_set_style_text_font(lbl_reset, &lv_font_montserrat_12, 0);
-  lv_obj_center(lbl_reset);
   lv_obj_add_event_cb(
-      btn_reset,
-      [](lv_event_t *e) {
-        if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-          applySettings(wifi_ssid.c_str(), wifi_pass.c_str(),
-                        mqtt_server_ip.c_str(), mqtt_username.c_str(),
-                        mqtt_password.c_str(), weatherCity, panelTitle,
-                        themeDark, useLargeTiles, displayBrightness,
-                        use24HourFormat, "admin", "admin");
-        }
-      },
-      LV_EVENT_ALL, NULL);
-
-  // ── Glass Card 3: Appearance (Layout + Wallpaper) ───────
-  lv_obj_t *card_appr = ui_create_glass_card(tab_dev, 444, 116);
-  lv_obj_align(card_appr, LV_ALIGN_TOP_MID, 0, 212);
-  lv_obj_set_style_pad_all(card_appr, 12, 0);
-
-  // Layout style dropdown — left
-  lv_obj_t *lay_label = lv_label_create(card_appr);
-  lv_label_set_text(lay_label, "Home Layout");
-  lv_obj_set_style_text_color(lay_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_set_style_text_font(lay_label, &lv_font_montserrat_12, 0);
-  lv_obj_align(lay_label, LV_ALIGN_TOP_LEFT, 2, 0);
-
-  lv_obj_t *dd_lay = lv_dropdown_create(card_appr);
-  lv_dropdown_set_options(dd_lay, "Modern\nClassic");
-  lv_dropdown_set_selected(dd_lay, homeLayoutStyle);
-  lv_obj_set_width(dd_lay, 130);
-  lv_obj_align(dd_lay, LV_ALIGN_BOTTOM_LEFT, 2, -4);
-  ui_style_dropdown(dd_lay);
-  lv_obj_add_event_cb(
-      dd_lay,
+      sw_haptic,
       [](lv_event_t *e) {
         if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
-          lv_obj_t *dd = lv_event_get_target(e);
-          homeLayoutStyle = lv_dropdown_get_selected(dd);
+          hapticEnabled =
+              lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
           Preferences p; p.begin(NVS_NAMESPACE, false);
-          p.putInt("home_layout", homeLayoutStyle);
+          p.putBool("haptic", hapticEnabled);
           p.end();
-          // Rebuild main grid so new layout applies immediately
-          rebuild_grid();
+          if (hapticEnabled) hal_haptic_buzz(); // test buzz
         }
       },
       LV_EVENT_ALL, NULL);
 
-  // Wallpaper presets — right
-  lv_obj_t *wp_label = lv_label_create(card_appr);
-  lv_label_set_text(wp_label, "Wallpaper");
-  lv_obj_set_style_text_color(wp_label, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_set_style_text_font(wp_label, &lv_font_montserrat_12, 0);
-  lv_obj_align(wp_label, LV_ALIGN_TOP_LEFT, 150, 0);
-
-  // Decode preset thumbnails on first open (cached in PSRAM)
+  // Wallpaper — three presets plus a clear button
+  lv_obj_t *row_wp = settings_row(page, L(L_WALLPAPER), 82);
   for (int i = 0; i < 3; i++) wp_build_thumb(i);
-
-  // 4 thumbnails: preset 1, 2, 3, then a Trash button to remove wallpaper
   for (int i = 0; i < 4; i++) {
-    lv_obj_t *frame = lv_obj_create(card_appr);
-    lv_obj_set_size(frame, 64, 50);
-    lv_obj_align(frame, LV_ALIGN_BOTTOM_LEFT, 150 + i * 70, -4);
+    lv_obj_t *frame = lv_obj_create(row_wp);
+    lv_obj_set_size(frame, 62, 42);
+    lv_obj_align(frame, LV_ALIGN_BOTTOM_LEFT, i * 68, 0);
     lv_obj_set_style_bg_color(frame, lv_color_hex(CLR_HEX_PILL_BG), 0);
     lv_obj_set_style_bg_opa(frame, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(frame,
-        i == 3 ? lv_color_hex(CLR_HEX_DANGER) : lv_color_hex(CLR_HEX_PILL_BORDER), 0);
+    lv_obj_set_style_border_color(frame, i == 3 ? lv_color_hex(CLR_HEX_DANGER)
+                                                : lv_color_hex(CLR_HEX_PILL_BORDER), 0);
     lv_obj_set_style_border_width(frame, 1, 0);
     lv_obj_set_style_radius(frame, 8, 0);
     lv_obj_set_style_pad_all(frame, 1, 0);
@@ -560,17 +609,16 @@ void build_settings_screen() {
     lv_obj_add_flag(frame, LV_OBJ_FLAG_CLICKABLE);
 
     if (i < 3 && wp_thumb_decoded[i]) {
-      // Show the actual decoded wallpaper preview
       lv_obj_t *img = lv_img_create(frame);
       lv_img_set_src(img, &wp_thumb_dsc[i]);
       lv_obj_center(img);
       lv_obj_add_flag(img, LV_OBJ_FLAG_EVENT_BUBBLE);
     } else {
-      // Fallback: numeric label or trash icon
       lv_obj_t *bl = lv_label_create(frame);
-      lv_label_set_text(bl, i == 3 ? LV_SYMBOL_TRASH : (i == 0 ? "1" : i == 1 ? "2" : "3"));
-      lv_obj_set_style_text_color(bl,
-          i == 3 ? lv_color_hex(CLR_HEX_DANGER) : lv_color_hex(CLR_HEX_TEXT_HI), 0);
+      lv_label_set_text(bl, i == 3 ? LV_SYMBOL_TRASH
+                                   : (i == 0 ? "1" : i == 1 ? "2" : "3"));
+      lv_obj_set_style_text_color(bl, i == 3 ? lv_color_hex(CLR_HEX_DANGER)
+                                             : lv_color_hex(CLR_HEX_TEXT_HI), 0);
       lv_obj_set_style_text_font(bl, &lv_font_montserrat_16, 0);
       lv_obj_center(bl);
       lv_obj_add_flag(bl, LV_OBJ_FLAG_EVENT_BUBBLE);
@@ -581,12 +629,307 @@ void build_settings_screen() {
         frame,
         [](lv_event_t *e) {
           if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-            int id = (int)(intptr_t)lv_event_get_user_data(e);
             extern void ui_apply_wallpaper_preset(int);
-            ui_apply_wallpaper_preset(id);
+            ui_apply_wallpaper_preset((int)(intptr_t)lv_event_get_user_data(e));
           }
         },
         LV_EVENT_ALL, (void *)id);
+  }
+}
+
+// ╔═══════════════════════════════════════════╗
+// ║  TAB — Devices                            ║
+// ╚═══════════════════════════════════════════╝
+// Device, scene and schedule editing still live on their own screens; this tab
+// is where the header pills that used to reach them ended up.
+static void build_tab_devices(lv_obj_t *page) {
+  int on = 0, total = 0;
+  ui_count_visible_devices(&on, &total);
+
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%d / %d", on, total);
+  settings_status_row(page, L(L_DEVICES), buf,
+                      lv_color_hex(on > 0 ? CLR_HEX_ACCENT : CLR_HEX_TEXT_LOW));
+
+  snprintf(buf, sizeof(buf), "%d", roomCount);
+  settings_status_row(page, "Rooms", buf, lv_color_hex(CLR_HEX_TEXT_LOW));
+
+  settings_link_row(page, LV_SYMBOL_LIST, L(L_DEVICES), [](lv_event_t *e) {
+    build_device_list_screen();
+    if (ui_ScreenDevices)
+      lv_scr_load_anim(ui_ScreenDevices, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
+  });
+
+  settings_link_row(page, LV_SYMBOL_VIDEO, L(L_SCENES), [](lv_event_t *e) {
+    build_scene_list_screen();
+    if (ui_ScreenScenes)
+      lv_scr_load_anim(ui_ScreenScenes, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
+  });
+
+  settings_link_row(page, LV_SYMBOL_LOOP, L(L_SCHEDULES), [](lv_event_t *e) {
+    // Schedules are the second tab of the Scenes destination now.
+    ui_show_main_view(UI_VIEW_SCHEDULE);
+    lv_scr_load_anim(ui_ScreenMain, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
+  });
+}
+
+// ── Panel name editor ───────────────────────────────────
+// A small form in place of the tab body, same shape as the Wi-Fi one: the
+// keyboard needs the full screen width, so it is parented to the screen and
+// torn down by build_settings_screen().
+static lv_obj_t *ta_panel_name = NULL;
+
+static void panel_name_save_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  if (!ta_panel_name) return;
+
+  String name = lv_textarea_get_text(ta_panel_name);
+  name.trim();
+  if (name.isEmpty()) {
+    ui_show_toast(L(L_PANEL_NAME_EMPTY));
+    return;
+  }
+
+  strncpy(panelTitle, name.c_str(), sizeof(panelTitle) - 1);
+  panelTitle[sizeof(panelTitle) - 1] = '\0';
+  Preferences p;
+  p.begin(NVS_NAMESPACE, false);
+  p.putString("panel_title", panelTitle);
+  p.end();
+
+  // The name reaches three places: the header title on Home, the rail's
+  // monogram, and the screensaver's eyebrow. The first two update live; the
+  // screensaver is rebuilt next time it shows.
+  ui_nav_rail_refresh_logo();
+  invalidate_screensaver_build();
+  rebuild_grid();
+
+  ta_panel_name = NULL;
+  ui_show_toast(L(L_SAVE));
+  build_settings_screen();
+}
+
+static void build_panel_name_form() {
+  if (kb) { lv_obj_del(kb); kb = NULL; }
+  lv_obj_clean(set_container);
+  ta_ssid = ta_pass = ta_mqtt_srv = ta_mqtt_usr = ta_mqtt_pwd = ta_city = NULL;
+
+  const int card_w = UI_SETTINGS_W - 20;
+  lv_obj_t *card = ui_create_glass_card(set_container, card_w, 150);
+  lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_set_style_pad_all(card, 12, 0);
+
+  lv_obj_t *title = lv_label_create(card);
+  lv_label_set_text(title, L(L_PANEL_NAME));
+  lv_obj_set_style_text_color(title, CLR_PRIMARY, 0);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+  ta_panel_name = ui_create_textarea(card, card_w - 24, L(L_PANEL_NAME),
+                                     panelTitle, ta_wifi_event_cb);
+  lv_obj_align(ta_panel_name, LV_ALIGN_TOP_MID, 0, 30);
+
+  lv_obj_t *btn = ui_create_accent_btn(card, 100, 30, "", panel_name_save_cb,
+                                       NULL, LV_EVENT_CLICKED);
+  lv_obj_align(btn, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+  lv_label_set_text_fmt(lv_obj_get_child(btn, 0), LV_SYMBOL_OK " %s", L(L_SAVE));
+
+  lv_obj_t *cancel = ui_create_pill_btn(card, 92, 30, "",
+                                        lv_color_hex(CLR_HEX_TEXT_MID),
+                                        [](lv_event_t *e) {
+                                          ta_panel_name = NULL;
+                                          build_settings_screen();
+                                        },
+                                        NULL, LV_EVENT_CLICKED);
+  lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+  lv_label_set_text(lv_obj_get_child(cancel, 0), L(L_CANCEL));
+
+  kb = lv_keyboard_create(lv_obj_get_screen(set_container));
+  ui_style_keyboard(kb);
+  lv_obj_set_size(kb, SCREEN_WIDTH, 136);
+  lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+}
+
+// ── Restart / factory reset ─────────────────────────────
+// Both are irreversible from the panel's point of view, so both confirm. The
+// factory reset used to be reachable only by holding the screen during boot,
+// which nobody discovers by accident — or on purpose.
+static bool s_pending_factory_reset = false;
+
+static void danger_msgbox_cb(lv_event_t *e) {
+  lv_obj_t *mbox = lv_event_get_current_target(e);
+  const bool yes = (lv_msgbox_get_active_btn(mbox) == 0);
+  const bool wipe = s_pending_factory_reset;
+  s_pending_factory_reset = false;
+  lv_msgbox_close(mbox);
+  if (!yes) return;
+  Serial.flush();
+  if (wipe) factory_reset_now(); // wipes, then restarts
+  else      ESP.restart();
+}
+
+static void confirm_danger(const char *title, const char *msg, bool wipe) {
+  s_pending_factory_reset = wipe;
+  static const char *btns[3];
+  btns[0] = L(L_YES);
+  btns[1] = L(L_NO);
+  btns[2] = "";
+  lv_obj_t *mbox = lv_msgbox_create(lv_scr_act(), title, msg, btns, false);
+  ui_style_msgbox(mbox);
+  lv_obj_center(mbox);
+  lv_obj_add_event_cb(mbox, danger_msgbox_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+// A full-width outlined danger row. Never a filled button — a destructive
+// action should not be the loudest thing on the page.
+static void danger_row(lv_obj_t *page, const char *glyph, const char *text,
+                       lv_event_cb_t cb) {
+  lv_obj_t *row = settings_row(page, NULL);
+  lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_border_color(row, lv_color_hex(CLR_HEX_DANGER), 0);
+  lv_obj_set_style_border_opa(row, LV_OPA_70, 0);
+  lv_obj_set_style_bg_color(row, lv_color_hex(CLR_HEX_DANGER), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_opa(row, LV_OPA_30, LV_STATE_PRESSED);
+  lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, NULL);
+
+  lv_obj_t *lbl = lv_label_create(row);
+  lv_label_set_text_fmt(lbl, "%s  %s", glyph, text);
+  lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_HEX_DANGER_HI), 0);
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+  lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+}
+
+// ╔═══════════════════════════════════════════╗
+// ║  TAB — System                             ║
+// ╚═══════════════════════════════════════════╝
+static void build_tab_system(lv_obj_t *page) {
+  char buf[64];
+
+  if (isWifiConnected) {
+    snprintf(buf, sizeof(buf), "%s  %d dBm", WiFi.SSID().c_str(), wifiRssi);
+    settings_status_row(page, "Wi-Fi", buf, lv_color_hex(CLR_HEX_OK));
+  } else {
+    settings_status_row(page, "Wi-Fi", L(L_DISCONNECTED),
+                        lv_color_hex(CLR_HEX_DANGER));
+  }
+
+  snprintf(buf, sizeof(buf), "%s:%d", mqtt_server_ip.c_str(), mqtt_port);
+  settings_status_row(page, "MQTT", isMqttConnected ? buf : L(L_DISCONNECTED),
+                      lv_color_hex(isMqttConnected ? CLR_HEX_OK : CLR_HEX_DANGER));
+
+  const unsigned long up = millis() / 1000;
+  snprintf(buf, sizeof(buf), "%lud %02lu:%02lu", up / 86400,
+           (up % 86400) / 3600, (up % 3600) / 60);
+  settings_status_row(page, "Uptime", buf, lv_color_hex(CLR_HEX_OK));
+
+  // ESP32-S3 internal die sensor — not the room temperature. It runs well
+  // above ambient behind a backlit panel, so the thresholds are set against
+  // what the silicon cares about, not what a room would.
+  {
+    const float die_c = temperatureRead();
+    snprintf(buf, sizeof(buf), "%.1f\xC2\xB0" "C", die_c);
+    settings_status_row(page, "Chip", buf,
+                        lv_color_hex(die_c >= 80.0f   ? CLR_HEX_DANGER
+                                     : die_c >= 65.0f ? CLR_HEX_ACCENT
+                                                      : CLR_HEX_OK));
+  }
+
+  // Internal RAM is the one that runs out — LVGL objects, the MQTT buffers and
+  // the web server all live there, while PSRAM holds the draw buffers and the
+  // wallpaper. Worth seeing separately.
+  const size_t heap_total = ESP.getHeapSize();
+  settings_meter_row(page, "Memory", heap_total - ESP.getFreeHeap(), heap_total,
+                     true);
+
+  const size_t psram_total = ESP.getPsramSize();
+  if (psram_total)
+    settings_meter_row(page, "PSRAM", psram_total - ESP.getFreePsram(),
+                       psram_total, false);
+
+  // LittleFS — wallpaper, translations and every config file.
+  settings_meter_row(page, "Storage", LittleFS.usedBytes(),
+                     LittleFS.totalBytes(), true);
+
+  // Panel name — opens the keyboard form
+  settings_link_row(page, LV_SYMBOL_EDIT, panelTitle, [](lv_event_t *e) {
+    build_panel_name_form();
+  });
+
+  // Firmware. There is no update *source* to pull from, so this is not a
+  // "check for updates" button — the panel is flashed by pushing a .bin at the
+  // web portal or over espota. What it can do is show the version, and show
+  // progress while an upload is landing.
+  if (otaActive) {
+    lv_obj_t *row = settings_row(page, L(L_UPDATING), 46);
+    lv_obj_t *bar = lv_bar_create(row);
+    lv_obj_set_size(bar, 168, 8);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_bar_set_range(bar, 0, 100);
+    lv_bar_set_value(bar, otaProgressPct, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(CLR_HEX_SURFACE_2), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(bar, 3, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(CLR_HEX_ACCENT), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar, 3, LV_PART_INDICATOR);
+
+    lv_obj_t *pct = lv_label_create(row);
+    lv_label_set_text_fmt(pct, "%d%%", otaProgressPct);
+    lv_obj_set_style_text_font(pct, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(pct, lv_color_hex(CLR_HEX_ACCENT), 0);
+    lv_obj_align(pct, LV_ALIGN_TOP_RIGHT, 0, 0);
+  } else {
+    settings_status_row(page, "Firmware", FW_VERSION,
+                        lv_color_hex(CLR_HEX_TEXT_LOW));
+  }
+
+  settings_link_row(page, LV_SYMBOL_WIFI, L(L_WIFI_SETUP), btn_wifi_config_cb);
+
+  // Reset web auth back to admin/admin
+  danger_row(page, LV_SYMBOL_WARNING, L(L_RESET_PASS), [](lv_event_t *e) {
+    applySettings(wifi_ssid.c_str(), wifi_pass.c_str(), mqtt_server_ip.c_str(),
+                  mqtt_username.c_str(), mqtt_password.c_str(), weatherCity,
+                  panelTitle, themeDark, useLargeTiles, displayBrightness,
+                  use24HourFormat, "admin", "admin");
+  });
+
+  danger_row(page, LV_SYMBOL_REFRESH, L(L_RESTART), [](lv_event_t *e) {
+    confirm_danger(L(L_RESTART), L(L_CONFIRM_RESTART), false);
+  });
+
+  danger_row(page, LV_SYMBOL_TRASH, L(L_FACTORY_RESET), [](lv_event_t *e) {
+    confirm_danger(L(L_FACTORY_RESET), L(L_CONFIRM_FACTORY_RESET), true);
+  });
+}
+
+// ========================================================
+//  SETTINGS BODY
+// ========================================================
+void build_settings_screen() {
+  if (set_container == NULL)
+    return;
+
+  // The keyboard is parented to the screen, not to set_container, so it can
+  // span the full width over the rail and sidebar. That also means cleaning
+  // the container does not take it with us.
+  if (kb) {
+    lv_obj_del(kb);
+    kb = NULL;
+  }
+  lv_obj_clean(set_container);
+
+  // Only the Wi-Fi form creates these; btn_save_settings_cb falls back to the
+  // stored values when they are NULL, so clearing them here is what keeps a
+  // rebuilt tab from handing Save a dangling textarea.
+  ta_ssid = ta_pass = ta_mqtt_srv = ta_mqtt_usr = ta_mqtt_pwd = ta_city = NULL;
+
+  lv_obj_t *page = settings_page(set_container);
+
+  switch (s_settings_tab) {
+  case SET_TAB_PORTAL:  build_tab_portal(page); break;
+  case SET_TAB_DISPLAY: build_tab_display(page); break;
+  case SET_TAB_DEVICES: build_tab_devices(page); break;
+  default:              build_tab_system(page); break;
   }
 }
 

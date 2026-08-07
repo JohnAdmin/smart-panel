@@ -6,176 +6,190 @@
 #include <stdio.h>
 #include <string.h>
 
-// Screen pointer (declared in ui_screens.h)
-lv_obj_t *ui_ScreenSchedules = NULL;
-
-// Persistent widgets
-static lv_obj_t *sched_list_container = NULL;
-
-static const char *day_labels[] = {nullptr}; // set at runtime via L()
+// Schedules used to own a full screen reached from its own rail slot. They are
+// now the second tab of the Scenes destination and render into whatever
+// container the caller hands over — scenes and schedules answer the same
+// question ("what runs, and when"), and the split cost a rail slot for a list
+// most panels open rarely.
 
 static const char *get_day_label(int d) {
-  static const LangKey day_keys[] = {L_DAY_SU, L_DAY_MO, L_DAY_TU, L_DAY_WE, L_DAY_TH, L_DAY_FR, L_DAY_SA};
+  static const LangKey day_keys[] = {L_DAY_SU, L_DAY_MO, L_DAY_TU,
+                                     L_DAY_WE, L_DAY_TH, L_DAY_FR, L_DAY_SA};
   return L(day_keys[d]);
-}
-
-void cleanup_schedule_screen() {
-  if (ui_ScreenSchedules) {
-    lv_anim_del(ui_ScreenSchedules, NULL);
-    lv_obj_del(ui_ScreenSchedules);
-    ui_ScreenSchedules = NULL;
-    sched_list_container = NULL;
-  }
-}
-
-static void btn_back_from_schedules(lv_event_t *e) {
-  if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-    sched_list_container = NULL;
-    lv_scr_load_anim(ui_ScreenSettings, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
-  }
 }
 
 static void toggle_schedule_cb(lv_event_t *e) {
   if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
   int idx = (int)(ptrdiff_t)lv_event_get_user_data(e);
   if (idx < 0 || idx >= scheduleCount) return;
-  schedules[idx].enabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  schedules[idx].enabled =
+      lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
   saveSchedules();
 }
 
-void build_schedule_list_screen() {
-  // Free other sub-screens first to keep LVGL heap healthy
-  cleanup_scene_screen();
-  cleanup_device_screen();
-  // Free screensaver if lingering
-  if (ui_ScreenSaver) { lv_anim_del(ui_ScreenSaver, NULL); lv_obj_del(ui_ScreenSaver); ui_ScreenSaver = NULL; }
+// Deleting a schedule can't be undone, and the row it lives on also carries a
+// switch — so a mis-tap is easy. Confirm first, the same as device deletion
+// and the room-wide off sweep.
+static int s_pending_delete = -1;
 
-  // ── If screen already exists, just refresh the list ──
-  if (ui_ScreenSchedules && sched_list_container) {
-    lv_obj_clean(sched_list_container);
-    goto populate;
+// Re-rendering tears down main_body_container, and the rows being destroyed are
+// siblings of the widget currently dispatching this event — so it has to happen
+// after LVGL finishes the dispatch, not inside it.
+static void rerender_schedule_async(void *unused) {
+  (void)unused;
+  ui_show_main_view(UI_VIEW_SCHEDULE);
+}
+
+static void delete_msgbox_cb(lv_event_t *e) {
+  lv_obj_t *mbox = lv_event_get_current_target(e);
+  const bool yes = (lv_msgbox_get_active_btn(mbox) == 0);
+  if (yes && s_pending_delete >= 0) {
+    deleteSchedule(s_pending_delete);
+    lv_async_call(rerender_schedule_async, NULL);
   }
+  s_pending_delete = -1;
+  lv_msgbox_close(mbox);
+}
 
-  // Delete stale screen (back was pressed, container cleared)
-  if (ui_ScreenSchedules) {
-    lv_anim_del(ui_ScreenSchedules, NULL);
-    lv_obj_del(ui_ScreenSchedules);
-    ui_ScreenSchedules = NULL;
-  }
+static void delete_schedule_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  int idx = (int)(ptrdiff_t)lv_event_get_user_data(e);
+  if (idx < 0 || idx >= scheduleCount) return;
+  s_pending_delete = idx;
 
-  // ── First time: create screen + header (persists) ──
-  ui_ScreenSchedules = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(ui_ScreenSchedules, CLR_BG_DEEP, 0);
+  // The button map must outlive this call — lv_msgbox keeps the pointer.
+  static const char *btns[3];
+  btns[0] = L(L_YES);
+  btns[1] = L(L_NO);
+  btns[2] = "";
 
-  {
-  // ── Header ──
-  lv_obj_t *header = lv_obj_create(ui_ScreenSchedules);
-  lv_obj_set_size(header, 480, 50);
-  lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
-  lv_obj_set_style_bg_color(header, lv_color_hex(CLR_HEX_CARD_BG), 0);
-  lv_obj_set_style_bg_opa(header, LV_OPA_90, 0);
-  lv_obj_set_style_border_width(header, 0, 0);
-  lv_obj_set_style_radius(header, 0, 0);
-  lv_obj_set_style_shadow_width(header, 0, 0);
-  lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *mbox = lv_msgbox_create(lv_scr_act(), L(L_CONFIRM_DELETE),
+                                    L(L_CONFIRM_DELETE_SCHED), btns, false);
+  ui_style_msgbox(mbox);
+  lv_obj_center(mbox);
+  lv_obj_add_event_cb(mbox, delete_msgbox_cb, LV_EVENT_VALUE_CHANGED, NULL);
+}
 
-  lv_obj_t *btn_back = lv_btn_create(header);
-  lv_obj_set_size(btn_back, 80, 36);
-  lv_obj_align(btn_back, LV_ALIGN_LEFT_MID, 4, 0);
-  lv_obj_set_style_bg_color(btn_back, lv_color_hex(CLR_HEX_PILL_BG), 0);
-  lv_obj_set_style_radius(btn_back, 12, 0);
-  lv_obj_set_style_shadow_width(btn_back, 0, 0);
-  lv_obj_t *lbl_back = lv_label_create(btn_back);
-  lv_label_set_text_fmt(lbl_back, LV_SYMBOL_LEFT " %s", L(L_BACK));
-  lv_obj_set_style_text_color(lbl_back, CLR_PRIMARY, 0);
-  lv_obj_set_style_text_font(lbl_back, &lv_font_montserrat_12, 0);
-  lv_obj_center(lbl_back);
-  lv_obj_add_event_cb(btn_back, btn_back_from_schedules, LV_EVENT_CLICKED, NULL);
+void build_schedule_view(lv_obj_t *parent) {
+  lv_obj_t *list = lv_obj_create(parent);
+  lv_obj_set_size(list, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(list, 0, 0);
+  lv_obj_set_style_pad_all(list, 0, 0);
+  lv_obj_set_style_pad_left(list, UI_CONTENT_PAD, 0);
+  lv_obj_set_style_pad_right(list, UI_CONTENT_PAD, 0);
+  lv_obj_set_style_pad_bottom(list, 8, 0);
+  lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_row(list, 6, 0);
+  lv_obj_set_scroll_dir(list, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
+  ui_style_scrollbar(list);
 
-  lv_obj_t *title = lv_label_create(header);
-  lv_label_set_text_fmt(title, LV_SYMBOL_LOOP " %s", L(L_SCHEDULES));
-  lv_obj_set_style_text_color(title, lv_color_hex(CLR_HEX_TEXT_HI), 0);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
-  lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
-
-  // ── Body ──
-  sched_list_container = lv_obj_create(ui_ScreenSchedules);
-  lv_obj_set_size(sched_list_container, 480, 270);
-  lv_obj_align(sched_list_container, LV_ALIGN_BOTTOM_MID, 0, 0);
-  lv_obj_set_style_bg_opa(sched_list_container, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(sched_list_container, 0, 0);
-  lv_obj_set_style_pad_all(sched_list_container, 8, 0);
-  lv_obj_set_flex_flow(sched_list_container, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_row(sched_list_container, 8, 0);
-  lv_obj_set_scrollbar_mode(sched_list_container, LV_SCROLLBAR_MODE_AUTO);
-  } // end header block
-
-populate:
   if (scheduleCount == 0) {
-    lv_obj_t *empty = lv_label_create(sched_list_container);
+    lv_obj_t *empty = lv_label_create(list);
     lv_label_set_text(empty, L(L_NO_SCHEDULES));
     lv_obj_set_style_text_color(empty, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(empty, 460);
-    lv_obj_set_style_pad_top(empty, 40, 0);
+    lv_obj_set_width(empty, LV_PCT(100));
+    lv_obj_set_style_pad_top(empty, 50, 0);
+    return;
   }
 
   for (int i = 0; i < scheduleCount; i++) {
     Schedule &sc = schedules[i];
 
-    lv_obj_t *card = lv_obj_create(sched_list_container);
-    lv_obj_set_size(card, 460, 64);
-    ui_style_surface(card, 14);
-    // Enabled schedules carry the accent on their outline
-    lv_obj_set_style_border_color(card, sc.enabled ? lv_color_hex(CLR_HEX_ACCENT)
-                                                   : lv_color_hex(CLR_HEX_HAIRLINE), 0);
-    lv_obj_set_style_pad_all(card, 10, 0);
-    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    // Rows are LV_PCT(100) rather than a fixed width: the old screen hard-coded
+    // 460 px, which overflowed once the nav rail took the content area down to
+    // 428.
+    lv_obj_t *row = lv_obj_create(list);
+    lv_obj_set_size(row, LV_PCT(100), 44);
+    lv_obj_set_style_bg_color(row, lv_color_hex(CLR_HEX_SURFACE_1), 0);
+    lv_obj_set_style_bg_grad_dir(row, LV_GRAD_DIR_NONE, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_90, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_opa(row, LV_OPA_COVER, 0);
+    // An enabled schedule carries the accent on its outline
+    lv_obj_set_style_border_color(row, sc.enabled
+                                           ? lv_color_hex(CLR_HEX_ACCENT)
+                                           : lv_color_hex(CLR_HEX_HAIRLINE), 0);
+    lv_obj_set_style_radius(row, 10, 0);
+    lv_obj_set_style_shadow_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 10, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Time
+    // Time — the thing you scan the list for, so it leads and stays largest
     char time_buf[8];
     snprintf(time_buf, sizeof(time_buf), "%02d:%02d", sc.hour, sc.minute);
-    lv_obj_t *time_lbl = lv_label_create(card);
+    lv_obj_t *time_lbl = lv_label_create(row);
     lv_label_set_text(time_lbl, time_buf);
-    lv_obj_set_style_text_font(time_lbl, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_text_color(time_lbl, sc.enabled ? lv_color_hex(CLR_HEX_ACCENT_HI)
-                                                 : lv_color_hex(CLR_HEX_TEXT_LOW), 0);
-    lv_obj_align(time_lbl, LV_ALIGN_LEFT_MID, 0, -8);
+    lv_obj_set_style_text_font(time_lbl, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(time_lbl,
+                                sc.enabled ? lv_color_hex(CLR_HEX_ACCENT_HI)
+                                           : lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+    lv_obj_align(time_lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
     // Scene name
-    const char *scene_name = (sc.scene_index >= 0 && sc.scene_index < sceneCount)
-                                 ? scenes[sc.scene_index].name : L(L_UNKNOWN);
-    lv_obj_t *scene_lbl = lv_label_create(card);
+    const char *scene_name =
+        (sc.scene_index >= 0 && sc.scene_index < sceneCount)
+            ? scenes[sc.scene_index].name
+            : L(L_UNKNOWN);
+    lv_obj_t *scene_lbl = lv_label_create(row);
     lv_label_set_text(scene_lbl, scene_name);
     lv_obj_set_style_text_font(scene_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(scene_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-    lv_obj_align(scene_lbl, LV_ALIGN_LEFT_MID, 0, 14);
+    lv_obj_set_style_text_color(scene_lbl, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+    lv_label_set_long_mode(scene_lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(scene_lbl, 150);
+    lv_obj_align(scene_lbl, LV_ALIGN_LEFT_MID, 56, -7);
 
-    // Days text
-    char days_buf[24] = "";
-    for (int d = 0; d < 7; d++) {
-      if (sc.days & (1 << d)) {
-        if (strlen(days_buf) > 0) strcat(days_buf, " ");
-        strcat(days_buf, get_day_label(d));
+    // Days
+    char days_buf[32] = "";
+    if (sc.days == DAY_ALL) {
+      strncpy(days_buf, L(L_EVERY_DAY), sizeof(days_buf) - 1);
+    } else {
+      for (int d = 0; d < 7; d++) {
+        if (!(sc.days & (1 << d))) continue;
+        if (days_buf[0]) strncat(days_buf, " ",
+                                 sizeof(days_buf) - strlen(days_buf) - 1);
+        strncat(days_buf, get_day_label(d),
+                sizeof(days_buf) - strlen(days_buf) - 1);
       }
     }
-    if (sc.days == 0x7F) strcpy(days_buf, L(L_EVERY_DAY));
-
-    lv_obj_t *days_lbl = lv_label_create(card);
+    lv_obj_t *days_lbl = lv_label_create(row);
     lv_label_set_text(days_lbl, days_buf);
     lv_obj_set_style_text_font(days_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(days_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-    lv_obj_align(days_lbl, LV_ALIGN_CENTER, 20, -8);
+    lv_obj_set_style_text_color(days_lbl, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+    lv_label_set_long_mode(days_lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(days_lbl, 150);
+    lv_obj_align(days_lbl, LV_ALIGN_LEFT_MID, 56, 8);
 
-    // Enable/Disable switch
-    lv_obj_t *sw = lv_switch_create(card);
-    lv_obj_set_size(sw, 44, 24);
-    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+    // Delete — outlined, never a filled danger button
+    lv_obj_t *btn_del = lv_btn_create(row);
+    lv_obj_set_size(btn_del, 26, 24);
+    lv_obj_align(btn_del, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_opa(btn_del, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_color(btn_del, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+    lv_obj_set_style_border_width(btn_del, 1, 0);
+    lv_obj_set_style_radius(btn_del, 7, 0);
+    lv_obj_set_style_shadow_width(btn_del, 0, 0);
+    lv_obj_set_style_bg_color(btn_del, lv_color_hex(CLR_HEX_DANGER),
+                              LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(btn_del, LV_OPA_40, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(btn_del, delete_schedule_cb, LV_EVENT_CLICKED,
+                        (void *)(ptrdiff_t)i);
+    lv_obj_t *lbl_del = lv_label_create(btn_del);
+    lv_label_set_text(lbl_del, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_text_font(lbl_del, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(lbl_del, lv_color_hex(CLR_HEX_DANGER_HI), 0);
+    lv_obj_center(lbl_del);
+
+    // Enable / disable
+    lv_obj_t *sw = lv_switch_create(row);
+    lv_obj_set_size(sw, 38, 21);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -34, 0);
     ui_style_switch(sw);
     if (sc.enabled) lv_obj_add_state(sw, LV_STATE_CHECKED);
-    lv_obj_add_event_cb(sw, toggle_schedule_cb, LV_EVENT_VALUE_CHANGED, (void*)(ptrdiff_t)i);
+    lv_obj_add_event_cb(sw, toggle_schedule_cb, LV_EVENT_VALUE_CHANGED,
+                        (void *)(ptrdiff_t)i);
   }
-
-  lv_scr_load_anim(ui_ScreenSchedules, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
 }

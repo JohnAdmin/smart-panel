@@ -2,6 +2,7 @@
 #include "../../include/globals.h"
 #include "../hal.h"
 #include "../lang.h"
+#include "../mqtt_manager.h"
 #include "../wifi_manager.h"
 #include "ui_dimmer_modal.h"
 #include "ui_helpers.h"
@@ -12,12 +13,6 @@
 
 // Globals for Dashboard
 lv_obj_t *home_time_label = NULL;
-lv_obj_t *home_date_label = NULL;
-lv_obj_t *home_weather_label = NULL;
-lv_obj_t *home_weather_temp_label = NULL;
-lv_obj_t *home_weather_city_label = NULL;
-static lv_obj_t *home_on_pill = NULL;
-static lv_obj_t *home_on_lbl = NULL;
 
 // Strip invisible/control bytes AND leading punctuation/symbols from `s`
 // in place. Removes UTF-8 BOM, zero-width chars, direction marks, C0
@@ -109,34 +104,8 @@ static void tile_sweep_cb(lv_timer_t *t) {
   }
 }
 
-// ========================================================
-//  ACTIVE TAB MEMORY
-// ========================================================
-// rebuild_grid() throws the tabview away and builds a new one, which used to
-// dump the user back on Home after every device edit, language change or
-// settings save. The tab is remembered by *name* rather than index, so it
-// survives rooms being added, removed or re-sorted.
-#define UI_MAX_TABS 18
-static char s_tab_names[UI_MAX_TABS][48];
-static int  s_tab_count = 0;
-static char s_active_tab_name[48] = "";
-
-static void tabview_changed_cb(lv_event_t *e) {
-  uint16_t idx = lv_tabview_get_tab_act(lv_event_get_target(e));
-  if (idx < (uint16_t)s_tab_count) {
-    strncpy(s_active_tab_name, s_tab_names[idx], sizeof(s_active_tab_name) - 1);
-    s_active_tab_name[sizeof(s_active_tab_name) - 1] = '\0';
-  }
-}
-
-// Records a tab's name as it is created, so the callback above can map an
-// index back to a name.
-static void tab_register(const char *name) {
-  if (s_tab_count >= UI_MAX_TABS) return;
-  strncpy(s_tab_names[s_tab_count], name, 47);
-  s_tab_names[s_tab_count][47] = '\0';
-  s_tab_count++;
-}
+// The room tabview is gone — rooms are cards on Home now, and which view the
+// user is on is remembered by s_view instead of by tab name.
 
 // ========================================================
 //  FAN PULSE ANIMATION HELPER (breathing glow when ON)
@@ -206,9 +175,20 @@ void btn_toggle_event_cb(lv_event_t *e) {
   }
 
   if (code == LV_EVENT_CLICKED) {
-    toggle_device(idx);
+    // A fan's power and its speed are the same dial: switching one on at speed
+    // 0 would leave a tile that claims to be on while the fan sits still. Tap
+    // moves it between "off" and the lowest speed instead, and the speed row
+    // handles everything above that.
+    if (devices[idx].dev_type == DEV_FAN)
+      set_device_level(idx, devices[idx].status ? 0 : 1);
+    else
+      toggle_device(idx);
   } else if (code == LV_EVENT_LONG_PRESSED) {
-    if (devices[idx].dimmer_topic[0] != '\0') {
+    // Only dimmers get the brightness modal. Fans and ACs also use the level
+    // channel, but their tiles carry their own control and the modal's 0-100
+    // slider would be meaningless for a speed or a setpoint.
+    if (devices[idx].dev_type == DEV_DIMMER &&
+        devices[idx].dimmer_topic[0] != '\0') {
       build_dimmer_modal(idx);
     }
   }
@@ -225,20 +205,30 @@ void scene_btn_event_cb(lv_event_t *e) {
   }
 }
 
-// Room "All OFF" — a one-tap, un-undoable action, so it asks first (device
-// deletion already does; switching a whole room off did not).
+// "All OFF" — a one-tap, un-undoable action, so it asks first (device deletion
+// already does; switching a whole room off did not).
+//
+// An empty room name means the whole house: the Home grid's All-off card
+// passes "" so it can reuse this path rather than carrying a second copy of
+// the confirm-then-sweep logic.
 static char s_pending_off_room[48] = "";
+static bool s_pending_off_armed = false;
+
+static bool device_in_off_scope(int i, const char *room) {
+  if (!ui_device_is_visible(i)) return false; // never switch the panel itself off
+  return room[0] == '\0' || strcmp(devices[i].room, room) == 0;
+}
 
 static void all_off_msgbox_cb(lv_event_t *e) {
   lv_obj_t *mbox = lv_event_get_current_target(e);
-  if (lv_msgbox_get_active_btn(mbox) == 0 && s_pending_off_room[0]) { // Yes
+  if (lv_msgbox_get_active_btn(mbox) == 0 && s_pending_off_armed) { // Yes
     for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++) {
-      if (!ui_device_is_visible(i)) continue; // never switch the panel itself off
-      if (strcmp(devices[i].room, s_pending_off_room) == 0 && devices[i].status)
+      if (device_in_off_scope(i, s_pending_off_room) && devices[i].status)
         toggle_device(i);
     }
   }
   s_pending_off_room[0] = '\0';
+  s_pending_off_armed = false;
   lv_msgbox_close(mbox);
 }
 
@@ -247,11 +237,9 @@ static void room_all_off_cb(lv_event_t *e) {
   if (!room) return;
 
   int on_now = 0;
-  for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++) {
-    if (ui_device_is_visible(i) && strcmp(devices[i].room, room) == 0 &&
-        devices[i].status)
-      on_now++;
-  }
+  for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++)
+    if (device_in_off_scope(i, room) && devices[i].status) on_now++;
+
   if (on_now == 0) { // nothing to do — don't ask a pointless question
     ui_show_toast(L(L_NOTHING_ON));
     return;
@@ -259,6 +247,7 @@ static void room_all_off_cb(lv_event_t *e) {
 
   strncpy(s_pending_off_room, room, sizeof(s_pending_off_room) - 1);
   s_pending_off_room[sizeof(s_pending_off_room) - 1] = '\0';
+  s_pending_off_armed = true;
 
   // The button map must outlive this call — lv_msgbox keeps the pointer.
   static const char *btns[3];
@@ -267,7 +256,8 @@ static void room_all_off_cb(lv_event_t *e) {
   btns[2] = "";
 
   char msg[96];
-  snprintf(msg, sizeof(msg), L(L_CONFIRM_ALL_OFF_MSG), room);
+  snprintf(msg, sizeof(msg), L(L_CONFIRM_ALL_OFF_MSG),
+           room[0] ? room : panelTitle);
   lv_obj_t *mbox = lv_msgbox_create(lv_scr_act(), L(L_CONFIRM_ALL_OFF), msg,
                                     btns, false);
   ui_style_msgbox(mbox);
@@ -276,23 +266,71 @@ static void room_all_off_cb(lv_event_t *e) {
 }
 
 // ========================================================
-//  Q1: SINGLE TILE FACTORY — eliminates ~55 lines of duplication
+//  DEVICE TILE
 // ========================================================
+// Two columns at ~197 px, laid out the way the design specifies: icon and
+// status on the top line, name under them, the type's control along the
+// bottom. The old three-column 126 px tile had no room for a control at all —
+// a four-button fan row would have given 24 px targets.
+
+// Per-tile control widget, by type: the fan's button matrix or the AC's
+// setpoint label. NULL for toggles and dimmers (a dimmer's bar lives in
+// device_level_bars). ui_update_device_status() repaints through this.
+static lv_obj_t *device_ctrl[MAX_DEVICES] = {NULL};
+
+// Shared across every fan tile — lv_btnmatrix stores the pointer rather than
+// copying, and the labels are identical on all of them. Refilled on each
+// rebuild so a language change lands.
+static const char *s_fan_map[5] = {"Off", "1", "2", "3", ""};
+
+static void fan_speed_cb(lv_event_t *e) {
+  int idx = (int)(ptrdiff_t)lv_event_get_user_data(e);
+  set_device_level(idx, lv_btnmatrix_get_selected_btn(lv_event_get_target(e)));
+}
+
+static void ac_step_cb(lv_event_t *e) {
+  // user_data packs the device index and the direction: idx*2 + (up ? 1 : 0)
+  const int packed = (int)(ptrdiff_t)lv_event_get_user_data(e);
+  const int idx = packed >> 1;
+  if (idx < 0 || idx >= deviceCount) return;
+  set_device_level(idx, devices[idx].brightness + ((packed & 1) ? 1 : -1));
+}
+
+// Small square stepper button for the AC setpoint.
+static void ac_step_btn(lv_obj_t *parent, const char *glyph, lv_align_t align,
+                        int packed) {
+  lv_obj_t *b = lv_btn_create(parent);
+  lv_obj_set_size(b, 30, 22);
+  lv_obj_align(b, align, 0, 0);
+  lv_obj_set_style_radius(b, 6, 0);
+  lv_obj_set_style_shadow_width(b, 0, 0);
+  lv_obj_set_style_pad_all(b, 0, 0);
+  lv_obj_set_style_bg_color(b, lv_color_hex(CLR_HEX_SURFACE_0), 0);
+  lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(b, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_width(b, 1, 0);
+  lv_obj_set_style_bg_color(b, lv_color_hex(CLR_HEX_ACCENT), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_opa(b, (lv_opa_t)56, LV_STATE_PRESSED);
+  lv_obj_add_event_cb(b, ac_step_cb, LV_EVENT_CLICKED, (void *)(ptrdiff_t)packed);
+
+  lv_obj_t *l = lv_label_create(b);
+  lv_label_set_text(l, glyph);
+  lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_color(l, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_obj_center(l);
+}
+
 // Builds a fully-styled device tile inside `parent` for device at `idx`.
-// Returns the tile object and populates the five output pointer params so the
-// caller can store them in the global device_* arrays.
-// --------------------------------------------------------
 static lv_obj_t *create_device_tile(lv_obj_t *parent, int idx, int tile_w,
                                     int tile_h, lv_obj_t **out_icon_cont,
                                     lv_obj_t **out_icon,
                                     lv_obj_t **out_name_lbl,
                                     lv_obj_t **out_stat_lbl,
-                                    lv_obj_t **out_level_bar,
-                                    bool home_style = false) {
-  // Dimmable devices get a level bar along the bottom edge. Long-press to open
-  // the brightness modal is otherwise an invisible gesture — the bar is what
-  // tells you the tile has a level to adjust, and what that level is.
-  const bool has_dimmer = devices[idx].dimmer_topic[0] != '\0';
+                                    lv_obj_t **out_level_bar) {
+  const Device &dev = devices[idx];
+  const bool is_dimmer = dev.dev_type == DEV_DIMMER;
+  const int inner_w = tile_w - 16; // tile pad is 8 a side
+
   // --- Tile container ---
   lv_obj_t *tile = lv_obj_create(parent);
   lv_obj_set_size(tile, tile_w, tile_h);
@@ -323,9 +361,10 @@ static lv_obj_t *create_device_tile(lv_obj_t *parent, int idx, int tile_w,
   lv_obj_set_style_border_color(tile, lv_color_hex(CLR_HEX_ACCENT), LV_STATE_PRESSED);
   lv_obj_set_style_border_opa(tile, LV_OPA_80, LV_STATE_PRESSED);
 
-  // --- 1. Icon Container (Badge circle for device icon) ---
+  // --- 1. Icon badge, top-left ---
   lv_obj_t *ic_cont = lv_obj_create(tile);
-  lv_obj_set_size(ic_cont, 44, 44);
+  lv_obj_set_size(ic_cont, 30, 30);
+  lv_obj_align(ic_cont, LV_ALIGN_TOP_LEFT, 0, 0);
   lv_obj_set_style_radius(ic_cont, LV_RADIUS_CIRCLE, 0);
   // Resting badge: raised neutral disc, not a coloured one — colour is the
   // signal for "this device is on".
@@ -337,75 +376,87 @@ static lv_obj_t *create_device_tile(lv_obj_t *parent, int idx, int tile_w,
   lv_obj_clear_flag(ic_cont, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(ic_cont, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-  // --- 2. Icon label ---
   lv_obj_t *ic = lv_label_create(ic_cont);
-  lv_label_set_text(ic, getIconSymbol(devices[idx].icon_type));
+  lv_label_set_text(ic, getIconSymbol(dev.icon_type));
   lv_obj_set_style_text_font(ic, &material_icons_font, 0);
   lv_obj_set_style_text_color(ic, lv_color_hex(CLR_HEX_TEXT_MID), 0);
   lv_obj_center(ic);
   lv_obj_add_flag(ic, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-  // --- 3. Device name ---
-  lv_obj_t *name_lbl = lv_label_create(tile);
-  lv_label_set_text(name_lbl, devices[idx].name);
-  lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_HEX_TEXT_HI), 0);
-  lv_obj_add_flag(name_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
-
-  // --- 4. Status text ("On" / "Off") — one step down in the type scale ---
+  // --- 2. Status, top-right — set by ui_update_device_status() ---
   lv_obj_t *stat_lbl = lv_label_create(tile);
   lv_label_set_text(stat_lbl, L(L_OFF));
   lv_obj_set_style_text_font(stat_lbl, &lv_font_montserrat_12, 0);
   lv_obj_set_style_text_color(stat_lbl, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_label_set_long_mode(stat_lbl, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(stat_lbl, inner_w - 36);
+  lv_obj_set_style_text_align(stat_lbl, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_align(stat_lbl, LV_ALIGN_TOP_RIGHT, 0, 4);
   lv_obj_add_flag(stat_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-  // --- 5. Brightness level bar (dimmable devices only) ---
+  // --- 3. Device name, under the badge ---
+  lv_obj_t *name_lbl = lv_label_create(tile);
+  lv_label_set_text(name_lbl, dev.name);
+  lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(name_lbl, inner_w);
+  lv_obj_align(name_lbl, LV_ALIGN_TOP_LEFT, 0, 34);
+  lv_obj_add_flag(name_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+  // --- 4. The type's control, along the bottom ---
   lv_obj_t *level_bar = NULL;
-  if (has_dimmer) {
+  device_ctrl[idx] = NULL;
+
+  switch (dev.dev_type) {
+  case DEV_DIMMER: {
+    // The bar is what tells you the tile has a level at all — long-pressing to
+    // open the brightness modal is otherwise an invisible gesture.
     level_bar = lv_bar_create(tile);
-    lv_obj_set_size(level_bar, tile_w - 30, 3);
+    lv_obj_set_size(level_bar, inner_w, 4);
     lv_obj_align(level_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_bar_set_range(level_bar, 0, 100);
-    lv_bar_set_value(level_bar, devices[idx].brightness, LV_ANIM_OFF);
+    lv_bar_set_value(level_bar, dev.brightness, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(level_bar, lv_color_hex(CLR_HEX_SURFACE_2), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(level_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(level_bar, 2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(level_bar, lv_color_hex(CLR_HEX_ACCENT), LV_PART_INDICATOR);
     lv_obj_set_style_radius(level_bar, 2, LV_PART_INDICATOR);
     lv_obj_add_flag(level_bar, LV_OBJ_FLAG_EVENT_BUBBLE);
+    break;
   }
-  // The bar eats 6 px at the bottom, so the text stack lifts and the badge
-  // shrinks a little to keep the same gaps on a tile of unchanged height.
-  const int lift = has_dimmer ? 6 : 0;
+  case DEV_FAN: {
+    lv_obj_t *bm = ui_create_segmented(tile, s_fan_map, inner_w, 20,
+                                       devices[idx].clampLevel(dev.brightness),
+                                       fan_speed_cb, (void *)(ptrdiff_t)idx);
+    lv_obj_align(bm, LV_ALIGN_BOTTOM_MID, 0, 0);
+    device_ctrl[idx] = bm;
+    break;
+  }
+  case DEV_AC: {
+    lv_obj_t *bar = lv_obj_create(tile);
+    lv_obj_set_size(bar, inner_w, 22);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_pad_all(bar, 0, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
-  // --- 6. Layout: badge on top, name, then status — same rhythm everywhere ---
-  if (home_style) {
-    const int badge = has_dimmer ? 36 : 40;
-    lv_obj_set_size(ic_cont, badge, badge);
-    lv_obj_align(ic_cont, LV_ALIGN_TOP_MID, 0, has_dimmer ? 2 : 4);
+    ac_step_btn(bar, LV_SYMBOL_MINUS, LV_ALIGN_LEFT_MID, idx * 2 + 0);
+    ac_step_btn(bar, LV_SYMBOL_PLUS, LV_ALIGN_RIGHT_MID, idx * 2 + 1);
 
-    lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(name_lbl, tile_w - 14);
-    lv_obj_set_style_text_align(name_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(name_lbl, LV_ALIGN_BOTTOM_MID, 0, -18 - lift);
-
-    lv_label_set_long_mode(stat_lbl, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(stat_lbl, tile_w - 14);
-    lv_obj_set_style_text_align(stat_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(stat_lbl, LV_ALIGN_BOTTOM_MID, 0, -2 - lift);
-  } else {
-    if (has_dimmer) lv_obj_set_size(ic_cont, 40, 40);
-    lv_obj_align(ic_cont, LV_ALIGN_TOP_MID, 0, has_dimmer ? 2 : 3);
-
-    lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(name_lbl, tile_w - 18);
-    lv_obj_set_style_text_align(name_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(name_lbl, LV_ALIGN_BOTTOM_MID, 0, -19 - lift);
-
-    lv_label_set_long_mode(stat_lbl, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(stat_lbl, tile_w - 18);
-    lv_obj_set_style_text_align(stat_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(stat_lbl, LV_ALIGN_BOTTOM_MID, 0, -3 - lift);
+    // Setpoint in the cool blue — the one place this palette uses it, so the
+    // number reads as a temperature rather than as device state.
+    lv_obj_t *t = lv_label_create(bar);
+    lv_label_set_text_fmt(t, "%d\xC2\xB0", devices[idx].clampLevel(dev.brightness));
+    lv_obj_set_style_text_font(t, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(t, lv_color_hex(CLR_HEX_COOL), 0);
+    lv_obj_center(t);
+    device_ctrl[idx] = t;
+    break;
+  }
+  default:
+    break; // DEV_TOGGLE — tapping the tile is the control
   }
 
   // --- Touch event ---
@@ -418,8 +469,588 @@ static lv_obj_t *create_device_tile(lv_obj_t *parent, int idx, int tile_w,
   *out_name_lbl = name_lbl;
   *out_stat_lbl = stat_lbl;
   if (out_level_bar) *out_level_bar = level_bar;
+  (void)is_dimmer;
 
   return tile;
+}
+
+// ========================================================
+//  MAIN-SCREEN VIEWS
+// ========================================================
+// ui_ScreenMain hosts several views inside main_body_container instead of
+// giving each one its own lv screen. The nav rail and the header are built
+// once on this screen and every view sits under them — which is what the
+// design shows, and it means switching views costs one lv_obj_clean() rather
+// than a screen load plus the cleanup bookkeeping every sub-screen needs.
+//
+// rebuild_grid() renders whichever view is current, so its existing callers
+// (language change, device edit, settings save) keep working unchanged.
+// Short local names for the ids ui_screens.h publishes.
+#define VIEW_HOME      UI_VIEW_HOME
+#define VIEW_FAVORITES UI_VIEW_FAVORITES
+#define VIEW_SCENES    UI_VIEW_SCENES
+#define VIEW_SCHEDULE  UI_VIEW_SCHEDULE
+static int s_view = VIEW_HOME;
+
+int ui_current_main_view() { return s_view; }
+
+void ui_show_main_view(int view) {
+  s_view = view;
+  rebuild_grid();
+}
+
+// Home cards carry only aggregate numbers, so nothing on them is redrawn by
+// the per-device tile update. These pointers let ui_update_device_status()
+// keep the counts live when a device changes state over MQTT while the user
+// is looking at Home.
+#define UI_MAX_HOME_CARDS (MAX_ROOMS + 1)
+static struct HomeCard {
+  int view_id; // room index, or VIEW_FAVORITES
+  lv_obj_t *icon;
+  lv_obj_t *dot;
+  lv_obj_t *sub;
+  lv_obj_t *sw; // list layout only
+} s_home_cards[UI_MAX_HOME_CARDS];
+static int s_home_card_count = 0;
+
+// Devices counted for one card. Favourites are a pseudo-room: they behave the
+// same on Home, they just gather their members by flag instead of by name.
+static void home_card_counts(int view_id, int *on, int *total) {
+  if (view_id == VIEW_FAVORITES) {
+    int o = 0, n = 0;
+    for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++) {
+      if (!ui_device_is_visible(i) || !devices[i].is_favorite) continue;
+      n++;
+      if (devices[i].status) o++;
+    }
+    if (on) *on = o;
+    if (total) *total = n;
+    return;
+  }
+  room_count_devices(view_id, on, total);
+}
+
+// True when `idx` belongs to the collection the given view shows.
+static bool device_in_view(int idx, int view_id) {
+  if (!ui_device_is_visible(idx)) return false;
+  if (view_id == VIEW_FAVORITES) return devices[idx].is_favorite;
+  if (view_id < 0 || view_id >= roomCount) return false;
+  return strcmp(devices[idx].room, rooms[view_id].name) == 0;
+}
+
+static void home_card_set_state(HomeCard &c) {
+  int on = 0, total = 0;
+  home_card_counts(c.view_id, &on, &total);
+  const lv_color_t live = lv_color_hex(on > 0 ? CLR_HEX_ACCENT : CLR_HEX_TEXT_LOW);
+
+  if (c.icon) lv_obj_set_style_text_color(c.icon, live, 0);
+  if (c.dot) lv_obj_set_style_bg_color(c.dot, live, 0);
+  if (c.sub) {
+    char buf[32];
+    if (on > 0) snprintf(buf, sizeof(buf), L(L_ON_COUNT), on);
+    else        snprintf(buf, sizeof(buf), "%s", L(L_NONE_ON));
+    lv_label_set_text(c.sub, buf);
+    lv_obj_set_style_text_color(
+        c.sub, lv_color_hex(on > 0 ? CLR_HEX_ACCENT_HI : CLR_HEX_TEXT_LOW), 0);
+  }
+  if (c.sw) {
+    if (on > 0) lv_obj_add_state(c.sw, LV_STATE_CHECKED);
+    else        lv_obj_clear_state(c.sw, LV_STATE_CHECKED);
+  }
+}
+
+static void refresh_home_cards() {
+  for (int i = 0; i < s_home_card_count; i++)
+    home_card_set_state(s_home_cards[i]);
+}
+
+// A new climate reading changes whether a room card has a third line at all,
+// so unlike a device state change there is no widget to poke — the cards have
+// to be rebuilt. Only worth doing while Home is actually on screen.
+void ui_refresh_home_climate() {
+  if (s_view == VIEW_HOME) rebuild_grid();
+}
+
+// ========================================================
+//  HOME VIEW — rooms
+// ========================================================
+
+static void card_open_view_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  hal_note_tile_event();
+  ui_show_main_view((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void back_to_home_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  ui_show_main_view(VIEW_HOME);
+}
+
+// Whole-room switch on the list layout. No confirmation here on purpose: the
+// design puts the switch on the row as a one-tap control, and the deliberate,
+// un-undoable version of the same action — the All OFF pill inside the room —
+// still asks. Nothing is rebuilt from inside the callback; the tiles and the
+// row's own labels are repainted by ui_update_device_status() as each toggle
+// lands.
+static void room_switch_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
+  const int view_id = (int)(intptr_t)lv_event_get_user_data(e);
+  const bool want_on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++) {
+    if (!device_in_view(i, view_id)) continue;
+    if (devices[i].status != want_on) toggle_device(i);
+  }
+}
+
+// Registers a card's live parts so refresh_home_cards() can find them again.
+static void home_card_track(int view_id, lv_obj_t *icon, lv_obj_t *dot,
+                            lv_obj_t *sub, lv_obj_t *sw) {
+  if (s_home_card_count >= UI_MAX_HOME_CARDS) return;
+  HomeCard &c = s_home_cards[s_home_card_count++];
+  c.view_id = view_id;
+  c.icon = icon;
+  c.dot = dot;
+  c.sub = sub;
+  c.sw = sw;
+  home_card_set_state(c);
+}
+
+// Grid layout: a 129×120 card per room. Icon and dot on the top line, name and
+// live count anchored to the bottom.
+static void create_room_card(lv_obj_t *parent, int view_id, const char *name,
+                             int icon_type) {
+  lv_obj_t *card = lv_obj_create(parent);
+  lv_obj_set_size(card, UI_ROOM_CARD_W, UI_ROOM_CARD_H);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+  lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
+
+  // Same resting surface as a device tile: flat fill at 90 % so the wallpaper
+  // supplies the depth a gradient cannot on this panel.
+  lv_obj_set_style_bg_color(card, lv_color_hex(CLR_HEX_SURFACE_1), 0);
+  lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_NONE, 0);
+  lv_obj_set_style_bg_opa(card, LV_OPA_90, 0);
+  lv_obj_set_style_border_color(card, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_opa(card, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(card, 1, 0);
+  lv_obj_set_style_radius(card, UI_CARD_RADIUS, 0);
+  lv_obj_set_style_shadow_color(card, lv_color_black(), 0);
+  lv_obj_set_style_shadow_width(card, 14, 0);
+  lv_obj_set_style_shadow_ofs_y(card, 4, 0);
+  lv_obj_set_style_shadow_opa(card, LV_OPA_40, 0);
+  lv_obj_set_style_pad_all(card, 10, 0);
+  lv_obj_set_style_border_color(card, lv_color_hex(CLR_HEX_ACCENT), LV_STATE_PRESSED);
+  lv_obj_set_style_border_opa(card, LV_OPA_80, LV_STATE_PRESSED);
+  lv_obj_add_event_cb(card, card_open_view_cb, LV_EVENT_CLICKED,
+                      (void *)(intptr_t)view_id);
+
+  lv_obj_t *icon = lv_label_create(card);
+  lv_label_set_text(icon, getIconSymbol(icon_type));
+  lv_obj_set_style_text_font(icon, &material_icons_font, 0);
+  lv_obj_align(icon, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_add_flag(icon, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+  lv_obj_t *dot = ui_create_dot(card, 7, lv_color_hex(CLR_HEX_TEXT_LOW));
+  lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, 0, 5);
+
+  const bool has_climate =
+      (view_id >= 0 && view_id < roomCount && rooms[view_id].climateValid);
+
+  lv_obj_t *nm = lv_label_create(card);
+  lv_label_set_text(nm, name);
+  lv_obj_set_style_text_font(nm, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(nm, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_label_set_long_mode(nm, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(nm, UI_ROOM_CARD_W - 20);
+  lv_obj_align(nm, LV_ALIGN_BOTTOM_LEFT, 0, has_climate ? -36 : -18);
+  lv_obj_add_flag(nm, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+  lv_obj_t *sub = lv_label_create(card);
+  lv_obj_set_style_text_font(sub, &lv_font_montserrat_12, 0);
+  lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(sub, UI_ROOM_CARD_W - 20);
+  lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, 0, has_climate ? -18 : 0);
+  lv_obj_add_flag(sub, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+  if (has_climate) {
+    lv_obj_t *clim = lv_label_create(card);
+    lv_label_set_text_fmt(clim, "%.1f\xC2\xB0 \xC2\xB7 %d%%", rooms[view_id].temp,
+                          rooms[view_id].hum);
+    lv_obj_set_style_text_font(clim, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(clim, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+    lv_obj_align(clim, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_add_flag(clim, LV_OBJ_FLAG_EVENT_BUBBLE);
+  }
+
+  home_card_track(view_id, icon, dot, sub, NULL);
+}
+
+// List layout: a 42 px row per room, carrying a whole-room switch.
+static void create_room_row(lv_obj_t *parent, int view_id, const char *name,
+                            int icon_type) {
+  lv_obj_t *row = lv_obj_create(parent);
+  lv_obj_set_size(row, LV_PCT(100), UI_ROOM_ROW_H);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+  lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_color(row, lv_color_hex(CLR_HEX_SURFACE_1), 0);
+  lv_obj_set_style_bg_grad_dir(row, LV_GRAD_DIR_NONE, 0);
+  lv_obj_set_style_bg_opa(row, LV_OPA_90, 0);
+  lv_obj_set_style_border_color(row, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_width(row, 1, 0);
+  lv_obj_set_style_border_opa(row, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(row, 10, 0);
+  lv_obj_set_style_shadow_width(row, 0, 0);
+  lv_obj_set_style_pad_all(row, 0, 0);
+  lv_obj_set_style_border_color(row, lv_color_hex(CLR_HEX_ACCENT), LV_STATE_PRESSED);
+
+  lv_obj_t *icon = lv_label_create(row);
+  lv_label_set_text(icon, getIconSymbol(icon_type));
+  lv_obj_set_style_text_font(icon, &material_icons_font, 0);
+  lv_obj_align(icon, LV_ALIGN_LEFT_MID, 10, 0);
+  lv_obj_add_flag(icon, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+  lv_obj_t *nm = lv_label_create(row);
+  lv_label_set_text(nm, name);
+  lv_obj_set_style_text_font(nm, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(nm, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_label_set_long_mode(nm, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(nm, 210);
+  lv_obj_align(nm, LV_ALIGN_LEFT_MID, 44, -8);
+  lv_obj_add_flag(nm, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+  lv_obj_t *sub = lv_label_create(row);
+  lv_obj_set_style_text_font(sub, &lv_font_montserrat_12, 0);
+  lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(sub, 210);
+  lv_obj_align(sub, LV_ALIGN_LEFT_MID, 44, 9);
+  lv_obj_add_flag(sub, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+  // Whole-room switch. It sits before the chevron so the row still opens the
+  // room when tapped anywhere else.
+  lv_obj_t *sw = lv_switch_create(row);
+  lv_obj_set_size(sw, 34, 19);
+  lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -32, 0);
+  lv_obj_set_style_bg_color(sw, lv_color_hex(CLR_HEX_SURFACE_2), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_color(sw, lv_color_hex(CLR_HEX_HAIRLINE), LV_PART_MAIN);
+  lv_obj_set_style_border_width(sw, 1, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(sw, lv_color_hex(CLR_HEX_ACCENT),
+                            LV_PART_INDICATOR | LV_STATE_CHECKED);
+  lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
+  lv_obj_set_style_bg_color(sw, lv_color_white(), LV_PART_KNOB);
+  lv_obj_add_event_cb(sw, room_switch_cb, LV_EVENT_VALUE_CHANGED,
+                      (void *)(intptr_t)view_id);
+
+  lv_obj_t *chev = lv_label_create(row);
+  lv_label_set_text(chev, LV_SYMBOL_RIGHT);
+  lv_obj_set_style_text_font(chev, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(chev, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_obj_align(chev, LV_ALIGN_RIGHT_MID, -10, 0);
+  lv_obj_add_flag(chev, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+  lv_obj_add_event_cb(row, card_open_view_cb, LV_EVENT_CLICKED,
+                      (void *)(intptr_t)view_id);
+  home_card_track(view_id, icon, NULL, sub, sw);
+}
+
+// House-wide off. Sized and placed like a room card so the grid stays even.
+// The design asks for a dashed outline here; LVGL 8 has no dashed border, so
+// the card is set apart by a dimmer fill and a danger-tinted press state
+// instead.
+static void create_all_off_card(lv_obj_t *parent) {
+  lv_obj_t *card = lv_obj_create(parent);
+  lv_obj_set_size(card, UI_ROOM_CARD_W, UI_ROOM_CARD_H);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
+  lv_obj_set_style_bg_color(card, lv_color_hex(CLR_HEX_SURFACE_0), 0);
+  lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_NONE, 0);
+  lv_obj_set_style_bg_opa(card, LV_OPA_70, 0);
+  lv_obj_set_style_border_color(card, lv_color_hex(CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_width(card, 1, 0);
+  lv_obj_set_style_border_opa(card, LV_OPA_70, 0);
+  lv_obj_set_style_radius(card, UI_CARD_RADIUS, 0);
+  lv_obj_set_style_shadow_width(card, 0, 0);
+  lv_obj_set_style_pad_all(card, 10, 0);
+  lv_obj_set_style_bg_color(card, lv_color_hex(CLR_HEX_DANGER), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_opa(card, LV_OPA_30, LV_STATE_PRESSED);
+  lv_obj_set_style_border_color(card, lv_color_hex(CLR_HEX_DANGER), LV_STATE_PRESSED);
+  // Empty room name = every room, which all_off_msgbox_cb reads as house-wide.
+  lv_obj_add_event_cb(card, room_all_off_cb, LV_EVENT_CLICKED, (void *)"");
+
+  lv_obj_t *icon = lv_label_create(card);
+  lv_label_set_text(icon, LV_SYMBOL_POWER);
+  lv_obj_set_style_text_font(icon, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_color(icon, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_obj_center(icon);
+  lv_obj_add_flag(icon, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+  lv_obj_t *lbl = lv_label_create(card);
+  lv_label_set_text(lbl, L(L_ALL_OFF));
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(lbl, UI_ROOM_CARD_W - 20);
+  lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(lbl, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_add_flag(lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
+}
+
+static void build_home_view() {
+  ui_set_header_title(panelTitle);
+
+  const bool list_layout = (homeLayoutStyle == 1);
+
+  lv_obj_t *c = lv_obj_create(main_body_container);
+  lv_obj_set_size(c, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_style_bg_opa(c, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(c, 0, 0);
+  lv_obj_set_style_pad_all(c, UI_CONTENT_PAD, 0);
+  lv_obj_set_flex_flow(c, list_layout ? LV_FLEX_FLOW_COLUMN
+                                      : LV_FLEX_FLOW_ROW_WRAP);
+  lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                        LV_FLEX_ALIGN_START);
+  lv_obj_set_style_pad_row(c, list_layout ? 6 : 8, 0);
+  lv_obj_set_style_pad_column(c, 8, 0);
+  lv_obj_set_scroll_dir(c, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(c, LV_SCROLLBAR_MODE_AUTO);
+  ui_style_scrollbar(c);
+
+  int fav_count = 0;
+  for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++)
+    if (ui_device_is_visible(i) && devices[i].is_favorite) fav_count++;
+
+  // Favourites lead: they are the devices the user singled out, so they should
+  // not be one tap further away than the rooms they live in.
+  if (fav_count > 0) {
+    if (list_layout)
+      create_room_row(c, VIEW_FAVORITES, L(L_FAVORITES), ICON_STRIP);
+    else
+      create_room_card(c, VIEW_FAVORITES, L(L_FAVORITES), ICON_STRIP);
+  }
+
+  int shown = 0;
+  for (int r = 0; r < roomCount; r++) {
+    int total = 0;
+    room_count_devices(r, NULL, &total);
+    if (total == 0) continue; // a room whose devices were all deleted
+    char nm[48];
+    strncpy(nm, rooms[r].name, sizeof(nm) - 1);
+    nm[sizeof(nm) - 1] = '\0';
+    sanitize_visible_text(nm);
+    if (!nm[0]) continue;
+    if (list_layout) create_room_row(c, r, nm, room_effective_icon(r));
+    else             create_room_card(c, r, nm, room_effective_icon(r));
+    shown++;
+    safe_wdt_reset();
+  }
+
+  if (shown == 0 && fav_count == 0) {
+    lv_obj_t *empty = lv_label_create(c);
+    lv_label_set_text(empty, L(L_NO_ROOMS));
+    lv_obj_set_style_text_color(empty, lv_color_hex(CLR_HEX_TEXT_MID), 0);
+    lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(empty, LV_PCT(100));
+    lv_obj_set_style_pad_top(empty, 60, 0);
+    return;
+  }
+
+  if (!list_layout) create_all_off_card(c);
+}
+
+// ========================================================
+//  ROOM / FAVOURITES VIEW — device tiles
+// ========================================================
+static void build_device_view(int view_id) {
+  const bool favourites = (view_id == VIEW_FAVORITES);
+  const char *title = favourites ? L(L_FAVORITES) : rooms[view_id].name;
+  ui_set_header_title(title);
+
+  // ── Sub-header: back, device count, room-wide off ──
+  lv_obj_t *bar = lv_obj_create(main_body_container);
+  lv_obj_set_size(bar, LV_PCT(100), 34);
+  lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(bar, 0, 0);
+  lv_obj_set_style_pad_all(bar, 0, 0);
+  lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t *back = ui_create_pill_btn(bar, 30, 26, LV_SYMBOL_LEFT,
+                                      lv_color_hex(CLR_HEX_TEXT_HI),
+                                      back_to_home_cb, NULL, LV_EVENT_CLICKED);
+  lv_obj_align(back, LV_ALIGN_LEFT_MID, UI_CONTENT_PAD, 0);
+
+  int on = 0, total = 0;
+  home_card_counts(view_id, &on, &total);
+  lv_obj_t *cnt = lv_label_create(bar);
+  lv_label_set_text_fmt(cnt, "%d %s", total, L(L_DEVICES));
+  lv_obj_set_style_text_font(cnt, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(cnt, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_obj_align(cnt, LV_ALIGN_LEFT_MID, UI_CONTENT_PAD + 40, 0);
+
+  // Outlined rather than filled — a destructive action should not be the
+  // loudest thing in the room.
+  if (!favourites) {
+    lv_obj_t *off_btn = lv_btn_create(bar);
+    lv_obj_set_size(off_btn, LV_SIZE_CONTENT, 26);
+    lv_obj_align(off_btn, LV_ALIGN_RIGHT_MID, -UI_CONTENT_PAD, 0);
+    lv_obj_set_style_bg_color(off_btn, lv_color_hex(CLR_HEX_DANGER), 0);
+    lv_obj_set_style_bg_opa(off_btn, LV_OPA_20, 0);
+    lv_obj_set_style_border_color(off_btn, lv_color_hex(CLR_HEX_DANGER), 0);
+    lv_obj_set_style_border_width(off_btn, 1, 0);
+    lv_obj_set_style_border_opa(off_btn, LV_OPA_70, 0);
+    lv_obj_set_style_shadow_width(off_btn, 0, 0);
+    lv_obj_set_style_radius(off_btn, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_hor(off_btn, 12, 0);
+    lv_obj_set_style_pad_ver(off_btn, 2, 0);
+    lv_obj_set_style_bg_opa(off_btn, LV_OPA_50, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(off_btn, room_all_off_cb, LV_EVENT_CLICKED,
+                        (void *)rooms[view_id].name);
+    lv_obj_t *off_lbl = lv_label_create(off_btn);
+    lv_label_set_text_fmt(off_lbl, LV_SYMBOL_POWER "  %s", L(L_ALL_OFF));
+    lv_obj_set_style_text_font(off_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(off_lbl, lv_color_hex(CLR_HEX_DANGER_HI), 0);
+    lv_obj_center(off_lbl);
+  }
+
+  // ── Tile grid ──
+  lv_obj_t *grid = lv_obj_create(main_body_container);
+  lv_obj_set_size(grid, LV_PCT(100), UI_CONTENT_H - 34);
+  lv_obj_align(grid, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(grid, 0, 0);
+  lv_obj_set_style_pad_all(grid, 0, 0);
+  lv_obj_set_style_pad_left(grid, UI_CONTENT_PAD, 0);
+  lv_obj_set_style_pad_right(grid, UI_CONTENT_PAD, 0);
+  lv_obj_set_style_pad_bottom(grid, 8, 0);
+  lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+  lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                        LV_FLEX_ALIGN_START);
+  lv_obj_set_style_pad_row(grid, 10, 0);
+  lv_obj_set_style_pad_column(grid, 10, 0);
+  lv_obj_set_scroll_dir(grid, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(grid, LV_SCROLLBAR_MODE_AUTO);
+  ui_style_scrollbar(grid);
+
+  // "Large tiles" now means one full-width column rather than a wider tile —
+  // two columns is already the design's layout, so the old 2-vs-3 distinction
+  // has nowhere left to go.
+  const int tile_w = useLargeTiles ? (UI_CONTENT_W - UI_CONTENT_PAD * 2)
+                                   : UI_DEV_TILE_W;
+
+  // Fan tiles share one label map; refill it here so a language change lands.
+  s_fan_map[0] = L(L_OFF);
+
+  for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++) {
+    if (!device_in_view(i, view_id)) continue;
+    device_tiles[i] = create_device_tile(
+        grid, i, tile_w, UI_DEV_TILE_H, &device_icon_containers[i], &device_icons[i],
+        &device_labels[i], &device_status_labels[i], &device_level_bars[i]);
+    ui_update_device_status(i, devices[i].status);
+    safe_wdt_reset();
+  }
+}
+
+// ========================================================
+//  SCENES + SCHEDULE — one destination, two tabs
+// ========================================================
+// Scenes and schedules answer the same question — what runs, and when — so
+// they share a rail slot and switch with a pill tab row instead of costing two.
+// The scene *editor* still lives behind Settings; this is the run surface.
+
+static void tab_switch_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  ui_show_main_view((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+// One pill in the tab row. Selected is an accent tint with an accent outline —
+// the same restraint as the nav rail, so a chosen tab never reads as a lit
+// device the way a solid accent fill would.
+static void tab_pill(lv_obj_t *row, const char *text, int x, bool active,
+                     int view_id) {
+  lv_obj_t *btn = lv_btn_create(row);
+  lv_obj_set_size(btn, 92, 22);
+  lv_obj_align(btn, LV_ALIGN_LEFT_MID, x, 0);
+  lv_obj_set_style_radius(btn, 7, 0);
+  lv_obj_set_style_shadow_width(btn, 0, 0);
+  lv_obj_set_style_pad_all(btn, 0, 0);
+  lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_HEX_ACCENT), 0);
+  lv_obj_set_style_bg_opa(btn, active ? (lv_opa_t)31 : LV_OPA_TRANSP, 0);
+  lv_obj_set_style_bg_opa(btn, (lv_opa_t)56, LV_STATE_PRESSED);
+  lv_obj_set_style_border_width(btn, 1, 0);
+  lv_obj_set_style_border_color(btn, lv_color_hex(active ? CLR_HEX_ACCENT
+                                                         : CLR_HEX_HAIRLINE), 0);
+  lv_obj_set_style_border_opa(btn, active ? (lv_opa_t)84 : LV_OPA_COVER, 0);
+  lv_obj_add_event_cb(btn, tab_switch_cb, LV_EVENT_CLICKED,
+                      (void *)(intptr_t)view_id);
+
+  lv_obj_t *lbl = lv_label_create(btn);
+  lv_label_set_text(lbl, text);
+  lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(
+      lbl, lv_color_hex(active ? CLR_HEX_ACCENT : CLR_HEX_TEXT_LOW), 0);
+  lv_obj_center(lbl);
+}
+
+// Builds the 30 px tab row and returns the container the tab body goes in.
+static lv_obj_t *build_tabbed_shell(int active_view) {
+  ui_set_header_title(active_view == UI_VIEW_SCENES ? L(L_SCENES)
+                                                    : L(L_SCHEDULES));
+
+  lv_obj_t *row = lv_obj_create(main_body_container);
+  lv_obj_set_size(row, LV_PCT(100), 30);
+  lv_obj_align(row, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(row, 0, 0);
+  lv_obj_set_style_pad_all(row, 0, 0);
+  lv_obj_set_style_pad_left(row, UI_CONTENT_PAD, 0);
+  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+  tab_pill(row, L(L_SCENES), 0, active_view == UI_VIEW_SCENES, UI_VIEW_SCENES);
+  tab_pill(row, L(L_SCHEDULES), 98, active_view == UI_VIEW_SCHEDULE,
+           UI_VIEW_SCHEDULE);
+
+  lv_obj_t *body = lv_obj_create(main_body_container);
+  lv_obj_set_size(body, LV_PCT(100), UI_CONTENT_H - 30);
+  lv_obj_align(body, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(body, 0, 0);
+  lv_obj_set_style_pad_all(body, 0, 0);
+  lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+  return body;
+}
+
+static void build_scenes_view() {
+  lv_obj_t *shell = build_tabbed_shell(UI_VIEW_SCENES);
+
+  lv_obj_t *c = lv_obj_create(shell);
+  lv_obj_set_size(c, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_style_bg_opa(c, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(c, 0, 0);
+  lv_obj_set_style_pad_all(c, 0, 0);
+  lv_obj_set_style_pad_top(c, 4, 0);
+  lv_obj_set_style_pad_bottom(c, 8, 0);
+  lv_obj_set_style_pad_left(c, UI_CONTENT_PAD, 0);
+  lv_obj_set_style_pad_right(c, UI_CONTENT_PAD, 0);
+  lv_obj_set_flex_flow(c, LV_FLEX_FLOW_ROW_WRAP);
+  lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                        LV_FLEX_ALIGN_START);
+  lv_obj_set_style_pad_row(c, 10, 0);
+  lv_obj_set_style_pad_column(c, 10, 0);
+  lv_obj_set_scroll_dir(c, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(c, LV_SCROLLBAR_MODE_AUTO);
+  ui_style_scrollbar(c);
+
+  if (sceneCount == 0) {
+    lv_obj_t *empty = lv_label_create(c);
+    lv_label_set_text(empty, L(L_NO_SCENES));
+    lv_obj_set_style_text_color(empty, lv_color_hex(CLR_HEX_TEXT_MID), 0);
+    lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(empty, LV_PCT(100));
+    lv_obj_set_style_pad_top(empty, 60, 0);
+    return;
+  }
+  create_scene_tiles(c);
 }
 
 // ========================================================
@@ -433,25 +1064,29 @@ void rebuild_grid() {
     device_icons[i] = NULL;
     device_labels[i] = NULL;
     device_status_labels[i] = NULL;
-    fav_tiles[i] = NULL;
-    fav_icon_containers[i] = NULL;
-    fav_icons[i] = NULL;
-    fav_labels[i] = NULL;
-    fav_status_labels[i] = NULL;
     device_level_bars[i] = NULL;
-    fav_level_bars[i] = NULL;
+    device_ctrl[i] = NULL;
     s_tile_stale[i] = false;
     s_tile_pending[i] = false;
   }
+  s_home_card_count = 0;
+
   lv_obj_clean(main_body_container);
 
   // One sweep timer for the lifetime of the UI; it skips devices with no tile.
-  // 1 Hz is fast enough for the pending indicator and costs a couple of
-  // comparisons per device.
   if (!s_tile_sweep_timer)
     s_tile_sweep_timer = lv_timer_create(tile_sweep_cb, 1000, NULL);
 
-  if (deviceCount == 0) {
+  // Devices can gain or lose a room name at any time — from the portal, the
+  // device manager, or a fresh devices.json — so the room list is reconciled
+  // on every rebuild rather than only at boot.
+  if (room_sync_from_devices()) saveRooms();
+
+  // Scenes and schedules stand on their own — a panel with no devices can still
+  // have both, so only the device-backed views fall back to Home here.
+  if (deviceCount == 0 && s_view != VIEW_SCENES && s_view != VIEW_SCHEDULE) {
+    s_view = VIEW_HOME;
+    ui_set_header_title(panelTitle);
     lv_obj_t *empty_lbl = lv_label_create(main_body_container);
     lv_label_set_text(empty_lbl, L(L_NO_DEVICES));
     lv_obj_set_style_text_color(empty_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
@@ -461,423 +1096,19 @@ void rebuild_grid() {
     return;
   }
 
-  // 1. Find unique rooms (max 16 rooms, 48 chars each to match Device.room)
-  // Hidden devices are skipped here too, so a room that only holds the panel's
-  // own status entry never gets a tab.
-  static char unique_rooms[16][48];
-  int num_rooms = 0;
-  for (int i = 0; i < deviceCount; i++) {
-    if (!ui_device_is_visible(i)) continue;
-    bool found = false;
-    for (int j = 0; j < num_rooms; j++) {
-      if (strcmp(unique_rooms[j], devices[i].room) == 0) {
-        found = true;
-        break;
-      }
-    }
-    if (!found && num_rooms < 16) {
-      strncpy(unique_rooms[num_rooms], devices[i].room, 48);
-      unique_rooms[num_rooms][47] = '\0'; // ensure null-termination
-      sanitize_visible_text(unique_rooms[num_rooms]);
-      // Skip empty room names that became empty after sanitization
-      if (unique_rooms[num_rooms][0] == '\0') {
-        continue;
-      }
-      // Re-check for duplicates after sanitization
-      bool dup = false;
-      for (int j = 0; j < num_rooms; j++) {
-        if (strcmp(unique_rooms[j], unique_rooms[num_rooms]) == 0) { dup = true; break; }
-      }
-      if (dup) continue;
-      num_rooms++;
-    }
-    safe_wdt_reset(); // Feed while searching
+  // The room being viewed can vanish under us when its last device is deleted.
+  if (s_view >= roomCount) s_view = VIEW_HOME;
+  if (s_view == VIEW_FAVORITES) {
+    int fav = 0;
+    home_card_counts(VIEW_FAVORITES, NULL, &fav);
+    if (fav == 0) s_view = VIEW_HOME;
   }
 
-  // Sort room names alphabetically (case-insensitive) so room tabs after "Home"
-  // appear in stable, predictable order regardless of devices.json ordering.
-  for (int a = 0; a < num_rooms - 1; a++) {
-    for (int b = 0; b < num_rooms - 1 - a; b++) {
-      if (strcasecmp(unique_rooms[b], unique_rooms[b + 1]) > 0) {
-        char tmp[48];
-        strncpy(tmp, unique_rooms[b], 48);
-        strncpy(unique_rooms[b], unique_rooms[b + 1], 48);
-        strncpy(unique_rooms[b + 1], tmp, 48);
-      }
-    }
-  }
-
-  // 2. Create Tabview
-  lv_obj_t *room_tabview =
-      lv_tabview_create(main_body_container, LV_DIR_TOP, UI_TABBAR_HEIGHT);
-  lv_obj_set_size(room_tabview, LV_PCT(100), LV_PCT(100));
-
-  // Make the entire Tabview structure transparent to inherit the seamless
-  // deep-space background
-  lv_obj_set_style_bg_opa(room_tabview, LV_OPA_TRANSP, 0);
-  lv_obj_t *tab_content = lv_tabview_get_content(room_tabview);
-  lv_obj_set_style_bg_opa(tab_content, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(tab_content, 0, 0);
-  lv_obj_set_style_pad_all(tab_content, 0,
-                           0); // Explicitly clear any default theme padding
-  // Prevent swipe gestures on tab content from stealing tile taps.
-  lv_obj_clear_flag(tab_content, LV_OBJ_FLAG_SCROLLABLE);
-
-  // ── Tab bar: quiet scrim, text-only tabs, amber underline on the active one.
-  // The stock theme paints a filled block behind the selected tab, which fights
-  // the tiles for attention — replaced here with a 3 px indicator rule.
-  lv_obj_t *tab_btns = lv_tabview_get_tab_btns(room_tabview);
-  // Scrim at 90 %, matching the cards. At the old 70 % a bright wallpaper lifted
-  // the strip to (65,80,90), which put the inactive tab labels at 2.0:1 — and no
-  // colour in the text ramp could rescue them without becoming TEXT_MID.
-  lv_obj_set_style_bg_color(tab_btns, lv_color_hex(CLR_HEX_SURFACE_0), 0);
-  lv_obj_set_style_bg_opa(tab_btns, LV_OPA_90, 0);
-  lv_obj_set_style_border_color(tab_btns, lv_color_hex(CLR_HEX_HAIRLINE), 0);
-  lv_obj_set_style_border_opa(tab_btns, LV_OPA_50, 0);
-  lv_obj_set_style_border_width(tab_btns, 1, 0);
-  lv_obj_set_style_border_side(tab_btns, LV_BORDER_SIDE_BOTTOM, 0);
-  lv_obj_set_style_text_font(tab_btns, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_pad_all(tab_btns, 0, 0);
-
-  // Inactive tab item
-  lv_obj_set_style_bg_opa(tab_btns, LV_OPA_TRANSP, LV_PART_ITEMS);
-  lv_obj_set_style_text_color(tab_btns, lv_color_hex(CLR_HEX_TEXT_LOW), LV_PART_ITEMS);
-  lv_obj_set_style_border_width(tab_btns, 0, LV_PART_ITEMS);
-  lv_obj_set_style_radius(tab_btns, 0, LV_PART_ITEMS);
-  lv_obj_set_style_pad_all(tab_btns, 0, LV_PART_ITEMS);
-
-  // Active tab item — brightest label + accent underline
-  lv_obj_set_style_bg_opa(tab_btns, LV_OPA_TRANSP, LV_PART_ITEMS | LV_STATE_CHECKED);
-  lv_obj_set_style_text_color(tab_btns, lv_color_hex(CLR_HEX_TEXT_HI),
-                              LV_PART_ITEMS | LV_STATE_CHECKED);
-  lv_obj_set_style_border_color(tab_btns, lv_color_hex(CLR_HEX_ACCENT),
-                                LV_PART_ITEMS | LV_STATE_CHECKED);
-  lv_obj_set_style_border_width(tab_btns, 3, LV_PART_ITEMS | LV_STATE_CHECKED);
-  lv_obj_set_style_border_side(tab_btns, LV_BORDER_SIDE_BOTTOM,
-                               LV_PART_ITEMS | LV_STATE_CHECKED);
-
-  // Press feedback on a tab
-  lv_obj_set_style_bg_color(tab_btns, lv_color_hex(CLR_HEX_ACCENT), LV_PART_ITEMS | LV_STATE_PRESSED);
-  lv_obj_set_style_bg_opa(tab_btns, LV_OPA_10, LV_PART_ITEMS | LV_STATE_PRESSED);
-
-  // 3. Home Tab — Premium Dashboard
-  s_tab_count = 0; // rebuilt below in the same order the tabs are added
-  lv_obj_t *home_tab = lv_tabview_add_tab(room_tabview, "Home");
-  tab_register("Home");
-  lv_obj_set_scrollbar_mode(home_tab, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_style_bg_opa(home_tab, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(home_tab, 0, 0);
-  lv_obj_set_style_pad_all(home_tab, 0, 0);
-
-  // Date / weather / device-count moved to global header.
-  // Home tab now hosts a NS-Panel-style weather hero card on the left and
-  // the Favorites grid on the right.
-  // Customisation: clearing the Weather City in Settings hides the weather
-  // card and lets the favourites grid take the full home tab width.
-  home_date_label    = NULL;
-  home_on_pill       = NULL;
-  home_on_lbl        = NULL;
-
-  // Home layout: 0=Modern (weather hero + favourites), 1=Classic (full-width grid)
-  const bool show_weather_card = (homeLayoutStyle == 0) && (weatherCity[0] != '\0');
-  const int  fav_left_offset   = show_weather_card ? (UI_WEATHER_CARD_W + 18) : 0;
-
-  if (show_weather_card) {
-  // ── Weather hero card (left) ──
-  // A single column of information with a clear top-to-bottom hierarchy:
-  //   city → glyph + temperature → condition → rule → house summary.
-  // The rule and summary anchor the bottom so the card never reads as a
-  // half-empty box, which is what the old layout looked like.
-  lv_obj_t *weather_card = lv_obj_create(home_tab);
-  lv_obj_set_size(weather_card, UI_WEATHER_CARD_W, LV_PCT(100) - 8);
-  lv_obj_align(weather_card, LV_ALIGN_LEFT_MID, 10, 0);
-  // Same 90 % flat fill as the tiles it sits beside — at cover it was the one
-  // opaque surface on the home tab and read as a slab next to them. The card
-  // carries the smallest type on the screen (TEXT_LOW at 12 px), so the cost
-  // was measured: against the shipped wallpaper the fill only ever darkens,
-  // leaving that text at 3.95:1 either way. A bright wallpaper takes it to
-  // ~3.1:1 — the same exposure the tiles' On/Off labels already run with.
-  lv_obj_set_style_bg_color(weather_card, lv_color_hex(CLR_HEX_SURFACE_1), 0);
-  lv_obj_set_style_bg_grad_dir(weather_card, LV_GRAD_DIR_NONE, 0);
-  lv_obj_set_style_bg_opa(weather_card, LV_OPA_90, 0);
-  lv_obj_set_style_radius(weather_card, 20, 0);
-  lv_obj_set_style_border_width(weather_card, 1, 0);
-  lv_obj_set_style_border_color(weather_card, lv_color_hex(CLR_HEX_HAIRLINE), 0);
-  lv_obj_set_style_border_opa(weather_card, LV_OPA_COVER, 0);
-  lv_obj_set_style_shadow_color(weather_card, lv_color_black(), 0);
-  lv_obj_set_style_shadow_width(weather_card, 16, 0);
-  lv_obj_set_style_shadow_ofs_y(weather_card, 4, 0);
-  lv_obj_set_style_shadow_opa(weather_card, LV_OPA_40, 0);
-  lv_obj_set_style_pad_all(weather_card, 14, 0);
-  lv_obj_clear_flag(weather_card, LV_OBJ_FLAG_SCROLLABLE);
-
-  // City label (top) — small caps-ish eyebrow, widest tracking on the screen
-  lv_obj_t *w_city = lv_label_create(weather_card);
-  {
-    char city_buf[64];
-    strncpy(city_buf,
-            weatherValid && weatherCityName[0] ? weatherCityName : weatherCity,
-            sizeof(city_buf) - 1);
-    city_buf[sizeof(city_buf) - 1] = '\0';
-    sanitize_visible_text(city_buf);
-    lv_label_set_text(w_city, city_buf);
-  }
-  lv_obj_set_style_text_font(w_city, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_text_color(w_city, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
-  lv_obj_set_style_text_letter_space(w_city, 1, 0);
-  lv_label_set_long_mode(w_city, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(w_city, UI_WEATHER_CARD_W - 28);
-  lv_obj_align(w_city, LV_ALIGN_TOP_LEFT, 0, 0);
-  home_weather_city_label = w_city;
-
-  // Condition glyph — the sun mark from the Material set, in accent
-  lv_obj_t *w_ico = lv_label_create(weather_card);
-  lv_label_set_text(w_ico, "\xEE\x94\x98"); // E518 light_mode
-  lv_obj_set_style_text_font(w_ico, &material_icons_font, 0);
-  lv_obj_set_style_text_color(w_ico, lv_color_hex(CLR_HEX_ACCENT), 0);
-  lv_obj_align(w_ico, LV_ALIGN_TOP_LEFT, 0, 24);
-
-  // Big temperature — the single largest element in the body
-  lv_obj_t *w_temp = lv_label_create(weather_card);
-  if (weatherValid) {
-    static char tbuf[16];
-    snprintf(tbuf, sizeof(tbuf), "%.0f\xC2\xB0", weatherTemp);
-    lv_label_set_text(w_temp, tbuf);
-  } else {
-    lv_label_set_text(w_temp, "--\xC2\xB0");
-  }
-  lv_obj_set_style_text_font(w_temp, &lv_font_montserrat_48, 0);
-  lv_obj_set_style_text_color(w_temp, lv_color_hex(CLR_HEX_TEXT_HI), 0);
-  lv_obj_align(w_temp, LV_ALIGN_TOP_LEFT, 0, 56);
-  home_weather_temp_label = w_temp;
-
-  // Condition / description
-  lv_obj_t *w_desc = lv_label_create(weather_card);
-  lv_label_set_text(w_desc, weatherValid ? weatherDesc : "Loading...");
-  lv_obj_set_style_text_font(w_desc, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(w_desc, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_label_set_long_mode(w_desc, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(w_desc, UI_WEATHER_CARD_W - 28);
-  lv_obj_align(w_desc, LV_ALIGN_TOP_LEFT, 0, 118);
-  home_weather_label = w_desc;
-
-  // Footer: rule + live house summary ("n of n on"), kept in sync by
-  // ui_update_device_status() through home_on_pill / home_on_lbl.
-  lv_obj_t *w_rule = ui_create_divider(weather_card, UI_WEATHER_CARD_W - 28);
-  lv_obj_align(w_rule, LV_ALIGN_BOTTOM_LEFT, 0, -26);
-
-  home_on_pill = ui_create_dot(weather_card, 8, lv_color_hex(CLR_HEX_TEXT_LOW));
-  lv_obj_align(home_on_pill, LV_ALIGN_BOTTOM_LEFT, 1, -5);
-
-  home_on_lbl = lv_label_create(weather_card);
-  lv_label_set_text_fmt(home_on_lbl, "0 of %d on", deviceCount);
-  lv_obj_set_style_text_font(home_on_lbl, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_text_color(home_on_lbl, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
-  lv_obj_align(home_on_lbl, LV_ALIGN_BOTTOM_LEFT, 16, 0);
-  } else {
-    // Weather hidden — clear pointers so update_home_dashboard skips them
-    home_weather_label      = NULL;
-    home_weather_temp_label = NULL;
-    home_weather_city_label = NULL;
-  }
-
-  // ── Favorites container (right of weather card, or full width if hidden) ──
-  // Vertical scrolling enabled so >2 favourites are reachable.
-  lv_obj_t *fav_container = lv_obj_create(home_tab);
-  lv_obj_set_size(fav_container, SCREEN_WIDTH - fav_left_offset, LV_PCT(100));
-  lv_obj_align(fav_container, LV_ALIGN_RIGHT_MID, -4, 0);
-  lv_obj_set_style_bg_opa(fav_container, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(fav_container, 0, 0);
-  lv_obj_set_style_pad_all(fav_container, 0, 0);
-  lv_obj_set_flex_flow(fav_container, LV_FLEX_FLOW_ROW_WRAP);
-  lv_obj_set_flex_align(fav_container, LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-  lv_obj_set_style_pad_top(fav_container, 8, 0);
-  lv_obj_set_style_pad_bottom(fav_container, 8, 0);
-  lv_obj_set_style_pad_row(fav_container, 10, 0);
-  lv_obj_set_style_pad_column(fav_container, 10, 0);
-  lv_obj_set_style_pad_left(fav_container, 4, 0);
-  lv_obj_set_style_pad_right(fav_container, 4, 0);
-  lv_obj_add_flag(fav_container, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_scroll_dir(fav_container, LV_DIR_VER);
-  lv_obj_set_scrollbar_mode(fav_container, LV_SCROLLBAR_MODE_AUTO);
-  ui_style_scrollbar(fav_container);
-
-  // 3b. Scenes Tab (only if scenes exist)
-  if (sceneCount > 0) {
-    lv_obj_t *scenes_tab = lv_tabview_add_tab(room_tabview, "Scenes");
-    tab_register("Scenes");
-    lv_obj_set_scrollbar_mode(scenes_tab, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_style_bg_opa(scenes_tab, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(scenes_tab, 0, 0);
-    lv_obj_set_style_pad_all(scenes_tab, 0, 0);
-    lv_obj_set_flex_flow(scenes_tab, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(scenes_tab, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_top(scenes_tab, 10, 0);
-    lv_obj_set_style_pad_bottom(scenes_tab, 8, 0);
-    lv_obj_set_style_pad_row(scenes_tab, 10, 0);
-    lv_obj_set_style_pad_column(scenes_tab, 10, 0);
-    lv_obj_set_style_pad_left(scenes_tab, 14, 0);
-    lv_obj_set_style_pad_right(scenes_tab, 14, 0);
-    lv_obj_add_flag(scenes_tab, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(scenes_tab, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(scenes_tab, LV_SCROLLBAR_MODE_AUTO);
-    ui_style_scrollbar(scenes_tab);
-    create_scene_tiles(scenes_tab);
-  }
-
-  // 4. Room Tabs
-  // Tile dimensions
-  int tile_w = UI_TILE_W;
-  int tile_h = UI_TILE_H;
-  int max_fav_count = UI_MAX_FAV_NORMAL;
-
-  if (useLargeTiles) {
-    tile_w = UI_TILE_LARGE_W;
-    tile_h = UI_TILE_H;
-    max_fav_count = UI_MAX_FAV_LARGE;
-  }
-
-  lv_obj_t *tabs[16]; // max 16 unique rooms
-  for (int i = 0; i < num_rooms; i++) {
-    tabs[i] = lv_tabview_add_tab(room_tabview, unique_rooms[i]);
-    tab_register(unique_rooms[i]);
-    lv_obj_set_style_bg_opa(tabs[i], LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(tabs[i], 0, 0);
-    lv_obj_set_style_pad_all(
-        tabs[i], 0, 0); // Strip default tab padding to prevent grid wrap
-    lv_obj_set_flex_flow(tabs[i], LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(tabs[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_top(tabs[i], 6, 0); // Match Home tab alignment
-    lv_obj_set_style_pad_bottom(tabs[i], 8, 0);
-    lv_obj_set_style_pad_row(tabs[i], 10, 0);
-    lv_obj_set_style_pad_column(tabs[i], 10, 0);
-    lv_obj_set_style_pad_left(tabs[i], 14, 0);
-    lv_obj_set_style_pad_right(tabs[i], 14, 0);
-    // Vertical scroll only: rooms with more than one row of devices used to be
-    // unreachable. Horizontal swipe stays disabled so it can't steal tile taps.
-    lv_obj_add_flag(tabs[i], LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(tabs[i], LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(tabs[i], LV_SCROLLBAR_MODE_AUTO);
-    ui_style_scrollbar(tabs[i]);
-
-    // ── Room action row: full-width so it always owns the first line ──
-    lv_obj_t *act_row = lv_obj_create(tabs[i]);
-    lv_obj_set_size(act_row, LV_PCT(100), 30);
-    lv_obj_set_style_bg_opa(act_row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(act_row, 0, 0);
-    lv_obj_set_style_pad_all(act_row, 0, 0);
-    lv_obj_clear_flag(act_row, LV_OBJ_FLAG_SCROLLABLE);
-
-    // Device count for this room, left-aligned
-    int room_n = 0;
-    for (int d = 0; d < deviceCount && d < MAX_DEVICES; d++) {
-      if (ui_device_is_visible(d) &&
-          strcmp(devices[d].room, unique_rooms[i]) == 0) room_n++;
-    }
-    lv_obj_t *cnt_lbl = lv_label_create(act_row);
-    lv_label_set_text_fmt(cnt_lbl, "%d %s", room_n, L(L_DEVICES));
-    lv_obj_set_style_text_font(cnt_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(cnt_lbl, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
-    lv_obj_align(cnt_lbl, LV_ALIGN_LEFT_MID, 2, 0);
-
-    // "All OFF" — outlined danger pill, right-aligned. Outlined rather than
-    // filled so a destructive action never dominates the room view.
-    lv_obj_t *off_btn = lv_btn_create(act_row);
-    lv_obj_set_size(off_btn, LV_SIZE_CONTENT, 28);
-    lv_obj_align(off_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(off_btn, lv_color_hex(CLR_HEX_DANGER), 0);
-    lv_obj_set_style_bg_opa(off_btn, LV_OPA_20, 0);
-    lv_obj_set_style_border_color(off_btn, lv_color_hex(CLR_HEX_DANGER), 0);
-    lv_obj_set_style_border_width(off_btn, 1, 0);
-    lv_obj_set_style_border_opa(off_btn, LV_OPA_70, 0);
-    lv_obj_set_style_shadow_width(off_btn, 0, 0);
-    lv_obj_set_style_radius(off_btn, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_pad_hor(off_btn, 14, 0);
-    lv_obj_set_style_pad_ver(off_btn, 4, 0);
-    lv_obj_set_style_bg_opa(off_btn, LV_OPA_50, LV_STATE_PRESSED);
-    lv_obj_add_event_cb(off_btn, room_all_off_cb, LV_EVENT_CLICKED,
-                        (void *)unique_rooms[i]);
-    lv_obj_t *off_lbl = lv_label_create(off_btn);
-    lv_label_set_text_fmt(off_lbl, LV_SYMBOL_POWER "  %s", L(L_ALL_OFF));
-    lv_obj_set_style_text_font(off_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(off_lbl, lv_color_hex(CLR_HEX_DANGER_HI), 0);
-    lv_obj_center(off_lbl);
-  }
-
-  // 5. Create Device Tiles using the shared factory function
-  // Favorites use compact dimensions so 2 columns fit beside the weather card
-  // (container ~280 wide, tile_fav_w 130 + 8 gap → 2 per row, vertical scroll
-  //  handles overflow when there are many favourites).
-  // Classic layout (no weather card) gives 3 columns of larger tiles.
-  const int fav_tile_w = show_weather_card ? UI_FAV_TILE_W : 150;
-  const int fav_tile_h = show_weather_card ? UI_FAV_TILE_H : UI_TILE_H;
-  const int fav_max    = MAX_DEVICES; // allow all favourites; container scrolls
-
-  int fav_count = 0;
-  for (int i = 0; i < deviceCount && i < MAX_DEVICES; i++) {
-    // Panel status entry: no tile anywhere. Its pointers stay NULL, which
-    // ui_update_device_status() already treats as "nothing to redraw".
-    if (!ui_device_is_visible(i)) continue;
-
-    if (devices[i].is_favorite && fav_count < fav_max) {
-      // --- Favorite tile: placed on the Home tab (tracked for live updates) ---
-      fav_tiles[i] = create_device_tile(
-          fav_container, i, fav_tile_w, fav_tile_h, &fav_icon_containers[i],
-          &fav_icons[i], &fav_labels[i], &fav_status_labels[i],
-          &fav_level_bars[i], /*home_style=*/true);
-      fav_count++;
-      // Colours are applied by ui_update_device_status() below, which mirrors
-      // the room tile onto this one.
-    }
-
-    // --- Room tile: placed in the matching room tab (tracked for live updates) ---
-    lv_obj_t *parent_tab = tabs[0];
-    for (int j = 0; j < num_rooms; j++) {
-      if (strcmp(unique_rooms[j], devices[i].room) == 0) {
-        parent_tab = tabs[j];
-        break;
-      }
-    }
-
-    device_tiles[i] = create_device_tile(
-        parent_tab, i, tile_w, tile_h, &device_icon_containers[i],
-        &device_icons[i], &device_labels[i], &device_status_labels[i],
-        &device_level_bars[i]);
-
-    // Always apply the correct colors/state for each tile (not just ON)
-    ui_update_device_status(i, devices[i].status);
-
-    safe_wdt_reset(); // Feed while creating 100 tiles
-  }
-
-  // Restore whichever tab the user was last on, matched by name so it still
-  // lands correctly when rooms have been added, removed or re-sorted.
-  if (s_active_tab_name[0]) {
-    for (int t = 0; t < s_tab_count; t++) {
-      if (strcmp(s_tab_names[t], s_active_tab_name) == 0) {
-        lv_tabview_set_act(room_tabview, (uint16_t)t, LV_ANIM_OFF);
-        break;
-      }
-    }
-  }
-  lv_obj_add_event_cb(room_tabview, tabview_changed_cb, LV_EVENT_VALUE_CHANGED,
-                      NULL);
-
-  // Show placeholder in Home tab when no favorites are set
-  if (fav_count == 0) {
-    lv_obj_t *hint = lv_label_create(fav_container);
-    static char fav_buf[128];
-    snprintf(fav_buf, sizeof(fav_buf), LV_SYMBOL_SETTINGS "  %s", L(L_FAV_HINT));
-    lv_label_set_text(hint, fav_buf);
-    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_color(hint, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(hint, LV_PCT(100));
-    lv_obj_set_style_pad_top(hint, 48, 0);
+  switch (s_view) {
+  case VIEW_HOME:     build_home_view(); break;
+  case VIEW_SCENES:   build_scenes_view(); break;
+  case VIEW_SCHEDULE: build_schedule_view(build_tabbed_shell(VIEW_SCHEDULE)); break;
+  default:            build_device_view(s_view); break;
   }
 }
 
@@ -885,6 +1116,11 @@ void rebuild_grid() {
 //  DEVICE STATUS UPDATE
 // ========================================================
 void ui_update_device_status(int index, bool state) {
+  // Home shows aggregate counts, not tiles, so its cards have to be refreshed
+  // before the per-tile guard below returns — on that view every device_tiles[]
+  // entry is NULL.
+  refresh_home_cards();
+
   if (index < 0 || index >= deviceCount || device_tiles[index] == NULL)
     return;
 
@@ -956,15 +1192,50 @@ void ui_update_device_status(int index, bool state) {
   const char *flag = pending ? "  " LV_SYMBOL_REFRESH
                              : (stale ? "  " LV_SYMBOL_WARNING : "");
 
+  // Status reads the type's own vocabulary: a percentage for a dimmer, a speed
+  // for a fan, "cooling" for an AC. A fan at speed 0 is off whatever the power
+  // flag says, which is what levelImpliesOff() encodes.
+  Device &d = devices[index];
+  const int level = d.clampLevel(d.brightness);
   char stat_buf[40]; // lv_label_set_text() copies, so a local is fine
-  if (state && devices[index].dimmer_topic[0] != '\0') {
-    snprintf(stat_buf, sizeof(stat_buf), "%s  %d%%%s", L(L_ON),
-             devices[index].brightness, flag);
+  if (!state) {
+    snprintf(stat_buf, sizeof(stat_buf), "%s%s", L(L_OFF), flag);
   } else {
-    snprintf(stat_buf, sizeof(stat_buf), "%s%s", state ? L(L_ON) : L(L_OFF),
-             flag);
+    switch (d.dev_type) {
+    case DEV_DIMMER:
+      snprintf(stat_buf, sizeof(stat_buf), "%s  %d%%%s", L(L_ON), level, flag);
+      break;
+    case DEV_FAN:
+      if (level == 0)
+        snprintf(stat_buf, sizeof(stat_buf), "%s%s", L(L_OFF), flag);
+      else {
+        char sp[24];
+        snprintf(sp, sizeof(sp), L(L_SPEED), level);
+        snprintf(stat_buf, sizeof(stat_buf), "%s%s", sp, flag);
+      }
+      break;
+    case DEV_AC:
+      snprintf(stat_buf, sizeof(stat_buf), "%s%s", L(L_COOLING), flag);
+      break;
+    default:
+      snprintf(stat_buf, sizeof(stat_buf), "%s%s", L(L_ON), flag);
+      break;
+    }
   }
   lv_label_set_text(device_status_labels[index], stat_buf);
+
+  // Keep the type's control in step — a level can arrive over MQTT as easily
+  // as from a tap here.
+  if (device_ctrl[index]) {
+    if (d.dev_type == DEV_FAN) {
+      lv_btnmatrix_clear_btn_ctrl_all(device_ctrl[index],
+                                      LV_BTNMATRIX_CTRL_CHECKED);
+      lv_btnmatrix_set_btn_ctrl(device_ctrl[index], level,
+                                LV_BTNMATRIX_CTRL_CHECKED);
+    } else if (d.dev_type == DEV_AC) {
+      lv_label_set_text_fmt(device_ctrl[index], "%d\xC2\xB0", level);
+    }
+  }
 
   // While a command is unconfirmed the badge sits at partial opacity, so the
   // tile reads as "asked for, not acknowledged" instead of claiming success.
@@ -992,89 +1263,4 @@ void ui_update_device_status(int index, bool state) {
 
   lv_obj_invalidate(device_tiles[index]);
 
-  // --- Update Favorite tile mirror (Home tab) ---
-  if (fav_tiles[index] != NULL) {
-    lv_obj_set_style_bg_color(fav_tiles[index], state ? bg_on : bg_off, 0);
-    lv_obj_set_style_bg_grad_dir(fav_tiles[index], LV_GRAD_DIR_NONE, 0);
-    lv_obj_set_style_bg_opa(fav_tiles[index], state ? bg_on_opa : LV_OPA_90, 0);
-    lv_obj_set_style_border_width(fav_tiles[index], 1, 0);
-    lv_obj_set_style_border_color(fav_tiles[index],
-                                  state ? ic_bg_on : lv_color_hex(CLR_HEX_HAIRLINE), 0);
-    lv_obj_set_style_border_opa(fav_tiles[index], state ? LV_OPA_70 : LV_OPA_COVER, 0);
-    lv_obj_set_style_shadow_color(fav_tiles[index],
-                                  state ? ic_bg_on : lv_color_black(), 0);
-    lv_obj_set_style_shadow_width(fav_tiles[index], state ? 18 : 14, 0);
-    lv_obj_set_style_shadow_ofs_y(fav_tiles[index], state ? 0 : 4, 0);
-    lv_obj_set_style_shadow_opa(fav_tiles[index], state ? LV_OPA_30 : LV_OPA_40, 0);
-    lv_obj_set_style_bg_color(fav_icon_containers[index], state ? ic_bg_on : ic_bg_off, 0);
-    lv_obj_set_style_bg_opa(fav_icon_containers[index],
-                            pending ? LV_OPA_50 : LV_OPA_COVER, 0);
-    if (fav_level_bars[index]) {
-      lv_bar_set_value(fav_level_bars[index], devices[index].brightness,
-                       LV_ANIM_OFF);
-      lv_obj_set_style_bg_opa(fav_level_bars[index],
-                              state ? LV_OPA_COVER : LV_OPA_30, LV_PART_INDICATOR);
-    }
-    lv_obj_set_style_text_color(fav_icons[index], state ? ico_on : ico_off, 0);
-    lv_obj_set_style_text_color(fav_labels[index], state ? txt_on : txt_off, 0);
-    lv_obj_set_style_text_color(fav_status_labels[index], state ? sub_on : sub_off, 0);
-    lv_label_set_text(fav_status_labels[index], lv_label_get_text(device_status_labels[index]));
-    // Fan spin on fav tile too
-    if (devices[index].icon_type == ICON_FAN) {
-      if (state) fan_spin_start(fav_icon_containers[index]);
-      else       fan_spin_stop(fav_icon_containers[index]);
-    }
-    lv_obj_invalidate(fav_tiles[index]);
-  }
-
-  // --- Update the house summary on the weather card ---
-  if (home_on_lbl && home_on_pill) {
-    int cnt = 0, total = 0;
-    ui_count_visible_devices(&cnt, &total);
-    static char on_cnt_buf[32];
-    snprintf(on_cnt_buf, sizeof(on_cnt_buf), "%d of %d on", cnt, total);
-    lv_label_set_text(home_on_lbl, on_cnt_buf);
-    lv_obj_set_style_bg_color(home_on_pill,
-                              cnt > 0 ? lv_color_hex(CLR_HEX_ACCENT)
-                                      : lv_color_hex(CLR_HEX_TEXT_LOW), 0);
-    lv_obj_set_style_text_color(home_on_lbl,
-                                cnt > 0 ? lv_color_hex(CLR_HEX_TEXT_MID)
-                                        : lv_color_hex(CLR_HEX_TEXT_LOW), 0);
-  }
-}
-
-// ========================================================
-//  HOME DASHBOARD UPDATER
-// ========================================================
-void update_home_dashboard() {
-  // Update date label
-  if (home_date_label) {
-    lv_label_set_text(home_date_label, currentDate);
-    lv_obj_align(home_date_label, LV_ALIGN_LEFT_MID, 0, weatherValid ? -11 : 0);
-  }
-  // Big temperature on the weather hero card
-  if (home_weather_temp_label) {
-    if (weatherValid) {
-      static char tbuf[16];
-      snprintf(tbuf, sizeof(tbuf), "%.0f\xC2\xB0", weatherTemp);
-      lv_label_set_text(home_weather_temp_label, tbuf);
-    } else {
-      lv_label_set_text(home_weather_temp_label, "--\xC2\xB0");
-    }
-  }
-  // City on the weather hero card
-  if (home_weather_city_label) {
-    char city_buf[64];
-    strncpy(city_buf,
-            weatherValid && weatherCityName[0] ? weatherCityName : "Weather",
-            sizeof(city_buf) - 1);
-    city_buf[sizeof(city_buf) - 1] = '\0';
-    sanitize_visible_text(city_buf);
-    lv_label_set_text(home_weather_city_label, city_buf);
-  }
-  // Description / condition
-  if (home_weather_label) {
-    lv_label_set_text(home_weather_label,
-                      weatherValid ? weatherDesc : "No data");
-  }
 }

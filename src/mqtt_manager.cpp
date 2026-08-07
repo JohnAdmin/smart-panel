@@ -1,6 +1,7 @@
 #include "mqtt_manager.h"
 #include "ui.h"
 #include "ui/ui_dimmer_modal.h"
+#include "ui/ui_screens.h" // ui_refresh_home_climate()
 #include "globals.h"
 #include <ArduinoJson.h>
 #include <MQTT.h>
@@ -136,6 +137,9 @@ void mqtt_callback(MQTTClient *client, char topic[], char bytes[], int length) {
             devices[i].brightness = b;
             if (xSemaphoreTake(lvgl_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
               update_dimmer_modal_value(i, b);
+              // Fan and AC tiles render the level itself, so an inbound value
+              // has to repaint the tile — not just the brightness modal.
+              ui_update_device_status(i, devices[i].status);
               xSemaphoreGive(lvgl_mux);
             }
             Serial.printf("[MQTT-BRIGHTNESS] Updated: %d%%\n", b);
@@ -238,6 +242,56 @@ void mqtt_callback(MQTTClient *client, char topic[], char bytes[], int length) {
       break;
     }
   }
+  // Room climate. Checked only when no device claimed the topic, so a room can
+  // never shadow a device that happens to share one.
+  if (!matched) {
+    for (int r = 0; r < roomCount; r++) {
+      if (!rooms[r].climate_topic[0]) continue;
+      if (strcmp(topic, rooms[r].climate_topic) != 0) continue;
+      matched = true;
+
+      // Accept the short keys the design uses and the long ones most sensor
+      // firmwares publish. A payload carrying only one of the two updates only
+      // that reading rather than zeroing the other.
+      float t = NAN;
+      int h = -1;
+      if (msg.startsWith("{") && msg.endsWith("}")) {
+        JsonDocument jd;
+        if (!deserializeJson(jd, msg)) {
+          if (jd["t"].is<float>())                 t = jd["t"].as<float>();
+          else if (jd["temp"].is<float>())         t = jd["temp"].as<float>();
+          else if (jd["temperature"].is<float>())  t = jd["temperature"].as<float>();
+          if (jd["h"].is<int>())                   h = jd["h"].as<int>();
+          else if (jd["hum"].is<int>())            h = jd["hum"].as<int>();
+          else if (jd["humidity"].is<int>())       h = jd["humidity"].as<int>();
+        }
+      } else {
+        // A bare number is a temperature — the common case for a lone sensor.
+        t = msg.toFloat();
+      }
+
+      bool changed = false;
+      if (!isnan(t) && t > -50.0f && t < 100.0f) { rooms[r].temp = t; changed = true; }
+      if (h >= 0 && h <= 100)                    { rooms[r].hum = h;  changed = true; }
+      if (!changed) {
+        Serial.printf("[ROOM-CLIMATE] '%s': unusable payload\n", rooms[r].name);
+        break;
+      }
+      rooms[r].climateValid = true;
+      Serial.printf("[ROOM-CLIMATE] '%s': %.1fC %d%%\n", rooms[r].name,
+                    rooms[r].temp, rooms[r].hum);
+
+      // Home renders the climate line from these fields, so the cards have to
+      // be rebuilt — unlike a device state change, there is no per-widget
+      // update path for it.
+      if (xSemaphoreTake(lvgl_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
+        ui_refresh_home_climate();
+        xSemaphoreGive(lvgl_mux);
+      }
+      break;
+    }
+  }
+
   if (!matched) {
     Serial.println("[MQTT-NO-MATCH] No device matched incoming MQTT message");
     Serial.printf("[MQTT-DEVICES-DEBUG] Total devices: %d\n", deviceCount);
@@ -292,6 +346,15 @@ void reconnect_mqtt() {
           Serial.printf("  DIMMER [%s]: '%s'\n", ok ? "OK" : "FAIL", devices[i].dimmer_topic);
         }
       }
+
+      // Room climate sensors — retained, so the reading lands right away.
+      for (int r = 0; r < roomCount; r++) {
+        if (!rooms[r].climate_topic[0]) continue;
+        bool ok = mqttClient.subscribe(rooms[r].climate_topic, 1);
+        Serial.printf("[MQTT-SUB] Room '%s' climate [%s]: '%s'\n", rooms[r].name,
+                      ok ? "OK" : "FAIL", rooms[r].climate_topic);
+      }
+
       network_request_all_states();
 
 #if MQTT_DEBUG_SNIFF_HOMEBRIDGE
@@ -478,6 +541,63 @@ void toggle_device(int index) {
 
   xSemaphoreGive(devices_mux);
   Serial.flush();
+}
+
+// Sends a device's numeric channel — brightness, fan speed or AC setpoint,
+// depending on its type. Mirrors toggle_device(): optimistic UI first, then a
+// queued publish, because direct MQTT access from the UI task races
+// mqttClient.loop() on the network task.
+void set_device_level(int index, int level) {
+  if (index < 0 || index >= deviceCount || index >= MAX_DEVICES) return;
+  Device &d = devices[index];
+  if (!d.hasLevel()) return;
+
+  level = d.clampLevel(level);
+  if (xSemaphoreTake(devices_mux, pdMS_TO_TICKS(200)) != pdTRUE) {
+    ui_show_toast("Busy...");
+    return;
+  }
+
+  d.brightness = level;
+  deviceStatesDirty = true;
+
+  // A fan dropped to 0 is off; raising a fan or dimmer off zero turns it on.
+  // The power command goes out separately from the level so devices that only
+  // understand ON/OFF still follow.
+  bool power_changed = false;
+  if (d.levelImpliesOff(level) && d.status) {
+    d.updateState(false);
+    power_changed = true;
+  } else if (d.levelImpliesOn(level) && !d.status) {
+    d.updateState(true);
+    power_changed = true;
+  }
+  if (power_changed) {
+    d.markToggled();
+    const char *payload = d.status ? "ON" : "OFF";
+    if (d.cmnd_topic[0]) mqtt_enqueue(d.cmnd_topic, payload, false);
+    if (d.state_topic[0]) mqtt_enqueue(d.state_topic, payload, true);
+  }
+
+  // Same fallback the brightness modal has always used: derive a level topic
+  // from the command topic when none is configured.
+  char payload[8];
+  snprintf(payload, sizeof(payload), "%d", level);
+  if (d.dimmer_topic[0]) {
+    mqtt_enqueue(d.dimmer_topic, payload, false);
+    Serial.printf("[MQTT-Q] Level %s -> %s\n", d.dimmer_topic, payload);
+  } else if (d.cmnd_topic[0]) {
+    String t = d.cmnd_topic;
+    t.replace("/POWER", "/Dimmer");
+    t.replace("/power", "/dimmer");
+    mqtt_enqueue(t.c_str(), payload, false);
+    Serial.printf("[MQTT-Q] Level %s -> %s (derived)\n", t.c_str(), payload);
+  } else {
+    ui_show_toast("No topic!");
+  }
+
+  ui_update_device_status(index, d.status);
+  xSemaphoreGive(devices_mux);
 }
 
 void network_request_all_states() {

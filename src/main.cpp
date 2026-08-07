@@ -121,6 +121,9 @@ void safe_wdt_reset() {
   }
 }
 
+volatile bool otaActive = false;
+volatile int  otaProgressPct = 0;
+
 bool pending_ota_reboot = false;
 unsigned long ota_reboot_time = 0;
 
@@ -128,6 +131,37 @@ unsigned long ota_reboot_time = 0;
 // Factory Reset — hold touch 3s during boot
 // =============================================
 #define FACTORY_RESET_HOLD_MS 3000
+
+// Wipes stored configuration. Shared by the boot-time hold and the Settings
+// button so the two can never drift apart on what "factory reset" means.
+static void factory_reset_wipe() {
+  Preferences prefs;
+  prefs.begin(NVS_NAMESPACE, false);
+  prefs.clear();
+  prefs.end();
+  Serial.println("[RESET] NVS cleared.");
+
+  if (LittleFS.begin(true)) {
+    if (LittleFS.exists(FS_DEVICES_JSON))   LittleFS.remove(FS_DEVICES_JSON);
+    if (LittleFS.exists(FS_DEVICES_BIN))    LittleFS.remove(FS_DEVICES_BIN);
+    if (LittleFS.exists(FS_ROOMS_JSON))     LittleFS.remove(FS_ROOMS_JSON);
+    if (LittleFS.exists(FS_SCENES_JSON))    LittleFS.remove(FS_SCENES_JSON);
+    if (LittleFS.exists(FS_SCHEDULES_JSON)) LittleFS.remove(FS_SCHEDULES_JSON);
+    if (LittleFS.exists(FS_WALLPAPER))      LittleFS.remove(FS_WALLPAPER);
+    LittleFS.end();
+    Serial.println("[RESET] LittleFS data files deleted.");
+  }
+}
+
+// Entry point for the Settings button. No LCD drawing here: the caller is on
+// the LVGL task with a screen already up.
+void factory_reset_now() {
+  Serial.println("[RESET] Factory reset requested from Settings");
+  factory_reset_wipe();
+  Serial.flush();
+  delay(400);
+  ESP.restart();
+}
 
 void check_factory_reset() {
   lgfx::LGFX_Device *lcd = hal_get_lcd();
@@ -196,23 +230,7 @@ void check_factory_reset() {
   lcd->setFont(&lgfx::fonts::DejaVu18);
   lcd->drawString("Erasing all data...", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
 
-  // 1. Clear NVS
-  Preferences prefs;
-  prefs.begin(NVS_NAMESPACE, false);
-  prefs.clear();
-  prefs.end();
-  Serial.println("[RESET] NVS cleared.");
-
-  // 2. Delete LittleFS data files
-  if (LittleFS.begin(true)) {
-    if (LittleFS.exists(FS_DEVICES_JSON))   LittleFS.remove(FS_DEVICES_JSON);
-    if (LittleFS.exists(FS_DEVICES_BIN))    LittleFS.remove(FS_DEVICES_BIN);
-    if (LittleFS.exists(FS_SCENES_JSON))    LittleFS.remove(FS_SCENES_JSON);
-    if (LittleFS.exists(FS_SCHEDULES_JSON)) LittleFS.remove(FS_SCHEDULES_JSON);
-    if (LittleFS.exists(FS_WALLPAPER))      LittleFS.remove(FS_WALLPAPER);
-    LittleFS.end();
-    Serial.println("[RESET] LittleFS data files deleted.");
-  }
+  factory_reset_wipe();
 
   lcd->fillScreen(0x0000);
   lcd->setTextColor(0x07E0, 0x0000); // green
@@ -265,6 +283,13 @@ void setup() {
   network_load_persistence(); // MUST load devices before UI init
   loadScenes();               // Load scene configurations from LittleFS
   loadSchedules();            // Load schedule configurations from LittleFS
+
+  // Rooms are discovered from the devices just loaded, so this has to follow
+  // network_load_persistence(). A panel upgrading from a build without
+  // rooms.json takes this path and writes one on first boot.
+  loadRooms();
+  if (room_sync_from_devices())
+    saveRooms();
 
   // Load language translations from LittleFS (uses currentLang from NVS)
   lang_load(currentLang);
@@ -405,7 +430,6 @@ void loop() {
       if (screensaverActive) {
         update_screensaver();
       } else {
-        update_home_dashboard();
       }
       xSemaphoreGive(lvgl_mux);
     }

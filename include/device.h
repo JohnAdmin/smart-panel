@@ -3,14 +3,29 @@
 #include <string.h>
 #include "../src/config.h"
 
+// What kind of control a device gets on its tile. Values are persisted in
+// devices.json, so only append.
+enum DevType : uint8_t {
+  DEV_TOGGLE = 0, // on/off only — tap the tile
+  DEV_DIMMER,     // 0-100 brightness
+  DEV_FAN,        // speed 0-3, where 0 also means off
+  DEV_AC,         // setpoint 18-30 °C
+  DEV_TYPE_COUNT
+};
+
 // Represents a single smart home device and its runtime state
 struct Device {
   char name[48];
   char room[48];
   char state_topic[64];
   char cmnd_topic[64];
+  // The numeric channel. Historically dimmer-only, hence the name and the
+  // devices.json key — both kept so existing configs load untouched — but what
+  // the number *means* now depends on type: brightness, fan speed, or target
+  // temperature. `brightness` below is the matching runtime value.
   char dimmer_topic[64];
   int icon_type;
+  uint8_t dev_type;
   bool is_favorite;
 
   // Runtime state (Not saved to NVS)
@@ -32,6 +47,7 @@ struct Device {
     memset(cmnd_topic, 0, sizeof(cmnd_topic));
     memset(dimmer_topic, 0, sizeof(dimmer_topic));
     icon_type = 0;
+    dev_type = DEV_TOGGLE;
     is_favorite = false;
     status = false;
     brightness = 50;
@@ -42,6 +58,33 @@ struct Device {
   }
 
   void updateState(bool newState) { status = newState; }
+
+  // ── The numeric channel, per type ───────────────────────
+  // Only these three carry a level; a plain toggle has nothing to send.
+  bool hasLevel() const {
+    return dev_type == DEV_DIMMER || dev_type == DEV_FAN || dev_type == DEV_AC;
+  }
+  int levelMin() const { return dev_type == DEV_AC ? 18 : 0; }
+  int levelMax() const {
+    switch (dev_type) {
+    case DEV_FAN: return 3;
+    case DEV_AC:  return 30;
+    default:      return 100;
+    }
+  }
+  int clampLevel(int v) const {
+    if (v < levelMin()) return levelMin();
+    if (v > levelMax()) return levelMax();
+    return v;
+  }
+  // A fan at speed 0 is off, and raising a dimmer or a fan off zero implies
+  // switching it on. An AC setpoint says nothing about power either way.
+  bool levelImpliesOn(int v) const {
+    return dev_type != DEV_AC && v > 0;
+  }
+  bool levelImpliesOff(int v) const {
+    return dev_type == DEV_FAN && v == 0;
+  }
 
   // True when this entry mirrors the panel's own availability topic. It exists
   // so Homebridge can see the panel as a switch; it is not a controllable

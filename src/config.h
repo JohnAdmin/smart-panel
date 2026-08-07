@@ -90,6 +90,7 @@
 #define FS_DEVICES_JSON    "/devices.json"
 #define FS_DEVICES_BIN     "/devices.bin"
 #define FS_WALLPAPER       "/wallpaper.jpg"
+#define FS_ROOMS_JSON      "/rooms.json"
 #define FS_SCENES_JSON     "/scenes.json"
 #define FS_SCHEDULES_JSON  "/schedules.json"
 
@@ -121,7 +122,15 @@
 #define ICON_STRIP 8
 #define ICON_GENERIC 9
 
+// Firmware version, shown on Settings -> System and in the portal.
+#define FW_VERSION "1.5.0"
+
 // --- Function declarations ---
+// Wipes NVS and the LittleFS config files, then reboots. Extracted from the
+// boot-time touch-and-hold path so Settings -> System can offer the same
+// thing — holding the screen during boot is not something anyone discovers.
+void factory_reset_now();
+
 void loadSettings();
 void applySettings(const char *ssid, const char *pass, const char *mqtt_server,
                    const char *mqtt_user, const char *mqtt_pass,

@@ -76,6 +76,19 @@ void loadDevices() {
     // Restore persisted state
     devices[deviceCount - 1].status = dev["status"] | false;
     devices[deviceCount - 1].brightness = dev["brightness"] | 0;
+
+    // dev_type predates nothing — every config written before device types
+    // existed lacks the key. Infer it the way the old UI behaved: a device
+    // with a dimmer topic got the brightness modal, everything else was a
+    // plain toggle. That leaves existing panels working identically until the
+    // owner picks a type in the portal.
+    Device &d = devices[deviceCount - 1];
+    if (dev["dev_type"].is<int>()) {
+      int t = dev["dev_type"].as<int>();
+      d.dev_type = (t >= 0 && t < DEV_TYPE_COUNT) ? (uint8_t)t : DEV_TOGGLE;
+    } else {
+      d.dev_type = d.dimmer_topic[0] ? DEV_DIMMER : DEV_TOGGLE;
+    }
   }
 
   Serial.printf("[DEV] Loaded %d devices from JSON OK\n", deviceCount);
@@ -96,6 +109,7 @@ bool saveDevices() {
     dev["cmnd_topic"] = devices[i].cmnd_topic;
     dev["dimmer_topic"] = devices[i].dimmer_topic;
     dev["icon_type"] = devices[i].icon_type;
+    dev["dev_type"] = devices[i].dev_type;
     dev["is_favorite"] = devices[i].is_favorite;
     dev["status"] = devices[i].status;
     dev["brightness"] = devices[i].brightness;

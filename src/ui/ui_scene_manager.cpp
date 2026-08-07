@@ -3,6 +3,7 @@
 #include "../wifi_manager.h"
 #include "../lang.h"
 #include "ui_helpers.h"
+#include "ui_nav_rail.h"
 #include "ui_screens.h"
 #include <esp_task_wdt.h>
 #include <string.h>
@@ -168,7 +169,6 @@ static void btn_add_action_cb(lv_event_t *e);
 // ╚═══════════════════════════════════════════╝
 void build_scene_list_screen() {
   // Free other sub-screens first to keep LVGL heap healthy
-  cleanup_schedule_screen();
   cleanup_device_screen();
   // Free screensaver if lingering
   if (ui_ScreenSaver) { lv_anim_del(ui_ScreenSaver, NULL); lv_obj_del(ui_ScreenSaver); ui_ScreenSaver = NULL; }
@@ -196,6 +196,8 @@ void build_scene_list_screen() {
   // ── First time: create screen structure (header persists) ──
   ui_ScreenScenes = lv_obj_create(NULL);
   lv_obj_set_style_bg_color(ui_ScreenScenes, CLR_BG_DEEP, 0);
+  // Rail first, so the header and body that follow stack above it.
+  ui_nav_rail_create(ui_ScreenScenes, UI_NAV_SCENES);
 
   {
   // ── Frosted glass header ────────────────────
@@ -241,8 +243,8 @@ void build_scene_list_screen() {
 
   // ── Scrollable list ─────────────────────────
   scene_list_container = lv_obj_create(ui_ScreenScenes);
-  lv_obj_set_size(scene_list_container, SCREEN_WIDTH, SCREEN_HEIGHT - 52);
-  lv_obj_align(scene_list_container, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_size(scene_list_container, UI_CONTENT_W, SCREEN_HEIGHT - 52);
+  lv_obj_align(scene_list_container, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
   lv_obj_set_flex_flow(scene_list_container, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_pad_all(scene_list_container, 10, 0);
   lv_obj_set_style_pad_row(scene_list_container, 6, 0);
@@ -273,7 +275,7 @@ populate:
 
     // Glass card row
     lv_obj_t *row = lv_obj_create(scene_list_container);
-    lv_obj_set_size(row, SCREEN_WIDTH - 24, 60);
+    lv_obj_set_size(row, UI_CONTENT_W - 24, 60);
     ui_style_surface(row, 14);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -299,6 +301,10 @@ populate:
     lv_label_set_text(nm, scenes[i].name);
     lv_obj_set_style_text_color(nm, lv_color_hex(CLR_HEX_TEXT_HI), 0);
     lv_obj_set_style_text_font(nm, &lv_font_montserrat_14, 0);
+    // Bounded so a long name ellipsises instead of running under the Edit and
+    // Delete pills, which start around x=292 on this 404 px row.
+    lv_obj_set_width(nm, 220);
+    lv_label_set_long_mode(nm, LV_LABEL_LONG_DOT);
     lv_obj_align(nm, LV_ALIGN_LEFT_MID, 52, -8);
 
     char info[24];
@@ -337,6 +343,8 @@ void build_edit_scene_screen(int index) {
     lv_obj_del(ui_ScreenEditScene);
   ui_ScreenEditScene = lv_obj_create(NULL);
   lv_obj_set_style_bg_color(ui_ScreenEditScene, CLR_BG_DEEP, 0);
+  // Rail first, so the header and body that follow stack above it.
+  ui_nav_rail_create(ui_ScreenEditScene, UI_NAV_SCENES);
 
   editSceneIndex = index;
 
@@ -375,8 +383,8 @@ void build_edit_scene_screen(int index) {
 
   // ── Scrollable form ─────────────────────────
   lv_obj_t *form = lv_obj_create(ui_ScreenEditScene);
-  lv_obj_set_size(form, SCREEN_WIDTH, SCREEN_HEIGHT - 52);
-  lv_obj_align(form, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_size(form, UI_CONTENT_W, SCREEN_HEIGHT - 52);
+  lv_obj_align(form, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
   lv_obj_set_flex_flow(form, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_pad_all(form, 14, 0);
   lv_obj_set_style_pad_row(form, 3, 0);
