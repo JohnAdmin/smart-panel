@@ -13,20 +13,51 @@
 // ────────────────────────────────────────────────────────
 
 // ── Layout / dimensions ─────────────────────────────────
-#define UI_HEADER_HEIGHT       44
+// The left nav rail owns a fixed 52 px column on every screen that carries it,
+// so content is laid out against UI_CONTENT_W (428) — not SCREEN_WIDTH. Every
+// tile width below is sized so its column count survives that narrower area;
+// they were tuned for 480 and each dropped a column when the rail arrived.
+#define UI_RAIL_W              52
+#define UI_HEADER_HEIGHT       38
+#define UI_CONTENT_W           (SCREEN_WIDTH - UI_RAIL_W)   // 428
+#define UI_CONTENT_H           (SCREEN_HEIGHT - UI_HEADER_HEIGHT) // 282
+#define UI_CONTENT_PAD         12   // side padding inside the content area
+// Header status cluster. Explicit, not LV_SIZE_CONTENT: LVGL clips children to
+// their parent's box, so a flex row that fails to shrink-wrap silently cuts off
+// whichever children sit furthest from the alignment edge — here the count chip
+// and the Wi-Fi glyph. Measured need is ~211 px with the AM/PM flag showing.
+#define UI_HDR_STATUS_W        220
+#define UI_HDR_TITLE_W         168
 #define UI_TABBAR_HEIGHT       40
 #define UI_SETTINGS_HDR_HEIGHT 52
+// Settings splits the content area again: a 116 px tab sidebar and what's left.
+#define UI_SIDEBAR_W           116
+#define UI_SETTINGS_W          (UI_CONTENT_W - UI_SIDEBAR_W) // 312
 #define UI_PILL_BTN_W          44
 #define UI_PILL_BTN_H          34
 #define UI_PILL_RADIUS         10
 #define UI_CARD_RADIUS         16
 #define UI_TILE_RADIUS         18
-#define UI_TILE_W              140
+// 3 columns: 3×126 + 2×10 gap = 398, inside 428 − 2×12 padding = 404.
+#define UI_TILE_W              126
 #define UI_TILE_H              104
-#define UI_TILE_LARGE_W        220
-#define UI_FAV_TILE_W          136
+// 2 columns: 2×196 + 10 = 402.
+#define UI_TILE_LARGE_W        196
+// Device tiles in a room went to two columns so the fan row and AC stepper
+// have usable targets: at the old three-column 126 px, four fan buttons came
+// out 24 px wide. 2×195 + 10 gap = 400, inside the 404 padded content width —
+// an exact fit risks flex rounding wrapping the second column.
+#define UI_DEV_TILE_W          195
+#define UI_DEV_TILE_H          92
+// Home tab, beside the weather card: 2×116 + 10 = 242 inside 254 − 2×4 = 246.
+#define UI_FAV_TILE_W          116
 #define UI_FAV_TILE_H          100
-#define UI_WEATHER_CARD_W      168
+// Home room cards: 3×129 + 2×8 gap = 403 inside 404; two rows of 120 + 8 gap
+// = 248 inside the 258 left after the content padding.
+#define UI_ROOM_CARD_W         129
+#define UI_ROOM_CARD_H         120
+#define UI_ROOM_ROW_H          42
+#define UI_WEATHER_CARD_W      142
 #define UI_MAX_FAV_NORMAL      6
 #define UI_MAX_FAV_LARGE       4
 #define UI_TOAST_DISMISS_MS    2000
@@ -97,6 +128,10 @@
 #define CLR_HEX_ACCENT_HI      0xFBBF24  // amber, lifted (text on dark tint)
 #define CLR_HEX_ACCENT_TINT    0x2C2008  // amber @ ~12 % — flat ON-tile fill
 #define CLR_HEX_OK             0x34D399  // connected / active
+// Cool cyan, used only for an AC setpoint. The R = G rule above governs
+// neutrals — a saturated accent is meant to read as a hue, and this one marks
+// a temperature so it must not be mistaken for the amber "device is on".
+#define CLR_HEX_COOL           0x5EC9F5
 #define CLR_HEX_DANGER         0xEF4444  // destructive actions (delete, all-off)
 #define CLR_HEX_DANGER_HI      0xFCA5A5  // danger text on a dark red tint
 
@@ -275,10 +310,12 @@ static inline lv_obj_t *ui_create_form_textarea(lv_obj_t *parent, int height,
 
 // ── Frosted Header Factory ──────────────────────────────
 // Creates the semi-transparent header bar used on settings/sub-screens.
+// Spans the content area, not the screen: every screen that uses this also
+// carries the nav rail, which owns the left UI_RAIL_W pixels.
 static inline lv_obj_t *ui_create_frosted_header(lv_obj_t *parent, int height) {
   lv_obj_t *hdr = lv_obj_create(parent);
-  lv_obj_set_size(hdr, SCREEN_WIDTH, height);
-  lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_size(hdr, UI_CONTENT_W, height);
+  lv_obj_align(hdr, LV_ALIGN_TOP_RIGHT, 0, 0);
   lv_obj_set_style_bg_color(hdr, lv_color_hex(CLR_HEX_SURFACE_0), 0);
   lv_obj_set_style_bg_opa(hdr, LV_OPA_90, 0);
   lv_obj_set_style_border_color(hdr, lv_color_hex(CLR_HEX_HAIRLINE), 0);
@@ -405,6 +442,58 @@ static inline void ui_style_dropdown(lv_obj_t *dd) {
   lv_obj_set_style_shadow_width(dd, 0, 0);
   lv_obj_set_style_border_color(dd, lv_color_hex(CLR_HEX_ACCENT), LV_STATE_PRESSED);
   lv_obj_add_event_cb(dd, _ui_dd_list_style_cb, LV_EVENT_READY, NULL);
+}
+
+// ── Segmented Button ────────────────────────────────────
+// The design's control for a small fixed choice (2–4 options), shown inline.
+//
+// Deliberately not lv_dropdown. A dropdown's open list is parented to the
+// screen and sized to its own content, so in the 312 px settings column it
+// opened wider than the row it belonged to and spilled over the card. A
+// segmented control has no popup, so the problem cannot occur — and it is what
+// the design specifies for these settings in the first place.
+//
+// `map` must outlive the widget: LVGL stores the pointer rather than copying,
+// and the array has to end with an empty string.
+static inline lv_obj_t *ui_create_segmented(lv_obj_t *parent, const char **map,
+                                             int w, int h, int sel,
+                                             lv_event_cb_t cb,
+                                             void *user_data = NULL) {
+  lv_obj_t *bm = lv_btnmatrix_create(parent);
+  lv_obj_set_size(bm, w, h);
+  lv_btnmatrix_set_map(bm, map);
+  lv_btnmatrix_set_btn_ctrl_all(bm, LV_BTNMATRIX_CTRL_CHECKABLE);
+  lv_btnmatrix_set_one_checked(bm, true);
+  if (sel >= 0) lv_btnmatrix_set_btn_ctrl(bm, sel, LV_BTNMATRIX_CTRL_CHECKED);
+
+  lv_obj_set_style_bg_opa(bm, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(bm, 0, LV_PART_MAIN);
+  lv_obj_set_style_shadow_width(bm, 0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(bm, 0, LV_PART_MAIN);
+  lv_obj_set_style_pad_column(bm, 4, LV_PART_MAIN);
+  lv_obj_set_style_pad_row(bm, 0, LV_PART_MAIN);
+
+  // Unselected: sunken neutral with a hairline outline
+  lv_obj_set_style_bg_color(bm, lv_color_hex(CLR_HEX_SURFACE_0), LV_PART_ITEMS);
+  lv_obj_set_style_bg_opa(bm, LV_OPA_COVER, LV_PART_ITEMS);
+  lv_obj_set_style_border_color(bm, lv_color_hex(CLR_HEX_HAIRLINE), LV_PART_ITEMS);
+  lv_obj_set_style_border_width(bm, 1, LV_PART_ITEMS);
+  lv_obj_set_style_border_opa(bm, LV_OPA_COVER, LV_PART_ITEMS);
+  lv_obj_set_style_radius(bm, 6, LV_PART_ITEMS);
+  lv_obj_set_style_text_color(bm, lv_color_hex(CLR_HEX_TEXT_LOW), LV_PART_ITEMS);
+  lv_obj_set_style_text_font(bm, &lv_font_montserrat_12, LV_PART_ITEMS);
+
+  // Selected: solid accent. This is the one control where a filled accent is
+  // right — it marks a chosen value, not a device that is switched on.
+  lv_obj_set_style_bg_color(bm, lv_color_hex(CLR_HEX_ACCENT),
+                            LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_bg_opa(bm, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_border_width(bm, 0, LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_text_color(bm, lv_color_hex(CLR_HEX_ON_ACCENT),
+                              LV_PART_ITEMS | LV_STATE_CHECKED);
+
+  if (cb) lv_obj_add_event_cb(bm, cb, LV_EVENT_VALUE_CHANGED, user_data);
+  return bm;
 }
 
 static inline void ui_style_keyboard(lv_obj_t *kb) {

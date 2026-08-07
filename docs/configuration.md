@@ -9,6 +9,7 @@ Defined in `src/config.h`.
 | Resource | Limit |
 |----------|-------|
 | Devices | 100 |
+| Rooms | 16 |
 | Scenes | 8 |
 | Schedules | 16 |
 | Actions per Scene | 10 |
@@ -27,6 +28,7 @@ Defined in `src/config.h`.
 | mDNS | smartpanel.local |
 | Web Auth | admin / admin |
 | Theme | Dark |
+| Home Layout | Grid (3-column room cards) |
 | Grid Layout | Normal (3-column) |
 | Time Format | 24-hour |
 | Timezone | GMT+7 |

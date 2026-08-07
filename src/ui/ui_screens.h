@@ -48,6 +48,7 @@ extern const lv_font_t material_icons_font;
 LV_FONT_DECLARE(lv_font_arial_120);
 
 // UI Shared Globals
+extern lv_obj_t *header_label_title;
 extern lv_obj_t *header_label_time;
 extern lv_obj_t *header_label_wifi;
 extern lv_obj_t *header_label_mqtt;
@@ -60,13 +61,23 @@ extern lv_obj_t *ui_DimmerModal;
 
 // Home Dashboard Globals
 extern lv_obj_t *home_time_label;
-extern lv_obj_t *home_date_label;
-extern lv_obj_t *home_weather_label;
 
 // Main Screen
 void rebuild_grid();
 void btn_toggle_event_cb(lv_event_t *e);
-void update_home_dashboard();
+void ui_set_header_title(const char *title);
+
+// Views hosted inside main_body_container. Negative ids are the fixed views
+// (see the VIEW_* defines in ui_main_screen.cpp); 0 and up index rooms[].
+// Switching view re-renders through rebuild_grid().
+void ui_show_main_view(int view);
+int  ui_current_main_view();
+// Rebuilds Home after a room's climate reading changes. No-op on other views.
+void ui_refresh_home_climate();
+#define UI_VIEW_HOME      (-1)
+#define UI_VIEW_FAVORITES (-2)
+#define UI_VIEW_SCENES    (-3)
+#define UI_VIEW_SCHEDULE  (-4)
 
 // Dashboard visibility — the panel's own status entry is not a controllable
 // device, so it is excluded from tiles, room tabs and every ON/total count.
@@ -75,6 +86,12 @@ void ui_count_visible_devices(int *on_count, int *total);
 
 // Settings
 void build_settings_screen();
+// Builds the 116 px tab sidebar. Called once when ui_ScreenSettings is created;
+// selecting a tab re-runs build_settings_screen() for the content area only.
+void build_settings_sidebar(lv_obj_t *screen);
+// Re-labels the sidebar tabs after a language change — they outlive the tab
+// bodies that build_settings_screen() re-creates.
+void ui_settings_refresh_chrome();
 void btn_settings_event_cb(lv_event_t *e);
 void btn_back_to_main_cb(lv_event_t *e);
 void btn_goto_devices_cb(lv_event_t *e);
@@ -92,13 +109,12 @@ void build_scene_list_screen();
 void build_edit_scene_screen(int index); // -1 = new scene
 void create_scene_tiles(lv_obj_t *parent); // builds scene cards on main screen
 
-// Schedule Manager
-extern lv_obj_t *ui_ScreenSchedules;
-void build_schedule_list_screen();
+// Schedule Manager — the second tab of the Scenes destination, rendered into
+// a caller-supplied container rather than owning a screen.
+void build_schedule_view(lv_obj_t *parent);
 
 // Sub-screen cleanup helpers (free LVGL heap before creating another)
 void cleanup_scene_screen();
-void cleanup_schedule_screen();
 void cleanup_device_screen();
 
 // Screensaver

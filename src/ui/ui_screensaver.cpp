@@ -65,6 +65,20 @@ static void colon_opa_anim_cb(void *obj, int32_t v) {
   lv_obj_set_style_text_opa((lv_obj_t *)obj, (lv_opa_t)v, 0);
 }
 
+// ── Flap flip ───────────────────────────────────────────
+// A real split-flap rotates the card face; this target cannot. 3D transforms
+// don't exist in LVGL 8, and `lv_obj_set_style_transform_angle` crashes here
+// rather than degrading (see CLAUDE.md), so the substitute is the one the
+// design specifies: grow the plate's height from zero while fading it in, over
+// 450 ms on an ease-out path. Read together they land close enough to a card
+// dropping into place.
+static void flap_h_anim_cb(void *obj, int32_t v) {
+  lv_obj_set_height((lv_obj_t *)obj, v);
+}
+static void flap_opa_anim_cb(void *obj, int32_t v) {
+  lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, 0);
+}
+
 void screensaver_touch_cb(lv_event_t *e) {
   if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
     if (millis() - last_ss_activation_ms < 500)
@@ -218,6 +232,15 @@ void build_screensaver() {
   lv_obj_set_style_radius(ss_content_wrap, 0, 0);
   lv_obj_set_style_clip_corner(ss_content_wrap, true, 0);
   lv_obj_clear_flag(ss_content_wrap, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Wake hint — the screensaver covers the whole panel, rail included, so
+  // nothing else on screen says the display is still live and touchable.
+  lv_obj_t *ss_hint = lv_label_create(ss_content_wrap);
+  lv_label_set_text(ss_hint, L(L_TAP_TO_WAKE));
+  lv_obj_set_style_text_font(ss_hint, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(ss_hint, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_obj_set_style_text_opa(ss_hint, LV_OPA_60, 0);
+  lv_obj_align(ss_hint, LV_ALIGN_TOP_RIGHT, -SS_SIDE_PAD, 14);
 
   // ====== STYLE 1: PREMIUM MINIMAL ======
   if (screensaverStyle == 1) {
@@ -432,13 +455,20 @@ void update_screensaver() {
                weatherTemp, weatherDesc);
   }
 
-  // --- Connectivity: coloured glyphs + a dim device count ---
-  char netBuf[96];
+  // --- Connectivity: coloured glyphs + how much of the house is on ---
+  // "n on" rather than a device total: the total never changes, so it told you
+  // nothing you could act on from across the room.
+  int on_count = 0, total_count = 0;
+  ui_count_visible_devices(&on_count, &total_count);
+  char onBuf[24];
+  snprintf(onBuf, sizeof(onBuf), L(L_ON_COUNT), on_count);
+
+  char netBuf[112];
   snprintf(netBuf, sizeof(netBuf),
-           "#%s " LV_SYMBOL_WIFI "#   #%s " LV_SYMBOL_UPLOAD "#   #6B7688 %d devices#",
+           "#%s " LV_SYMBOL_WIFI "#   #%s " LV_SYMBOL_UPLOAD "#   #%s %s#",
            isWifiConnected ? "34D399" : "EF4444",
            isMqttConnected ? "34D399" : "EF4444",
-           deviceCount);
+           on_count > 0 ? "F59E0B" : "6B7688", onBuf);
 
   // --- AM/PM flag (both styles; empty string in 24-hour mode) ---
   if (ss_meridiem_lbl &&
@@ -463,23 +493,36 @@ void update_screensaver() {
     char h1 = currentTime[0], h2 = currentTime[1];
     char m1 = currentTime[3], m2 = currentTime[4];
 
+    // The new digit is set first and then revealed by the animation. The
+    // previous version swapped the text and *then* squashed the plate down and
+    // back, so the new digit was already legible before the movement started —
+    // which read as a glitch rather than a flip.
     auto update_flap = [](lv_obj_t *lbl, char new_val, char &last_val) {
-      if (new_val != last_val) {
-        last_val = new_val;
-        lv_obj_t *flap = lv_obj_get_parent(lbl);
+      if (new_val == last_val) return;
+      last_val = new_val;
+      lv_obj_t *flap = lv_obj_get_parent(lbl);
+      lv_label_set_text_fmt(lbl, "%c", new_val);
 
-        lv_anim_t a;
-        lv_anim_init(&a);
-        lv_anim_set_var(&a, flap);
-        lv_anim_set_values(&a, 138, 0);
-        lv_anim_set_time(&a, 120);
-        lv_anim_set_playback_time(&a, 120);
-        lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_height);
+      // A minute can change while the previous flip is still running (the
+      // clock ticks every second and the animation lasts 450 ms). Drop the
+      // in-flight pass first, or the plate is left at whatever height the
+      // interrupted animation had reached.
+      lv_anim_del(flap, flap_h_anim_cb);
+      lv_anim_del(flap, flap_opa_anim_cb);
 
-        lv_label_set_text_fmt(lbl, "%c", new_val);
-        lv_anim_start(&a);
-      }
+      lv_anim_t a;
+      lv_anim_init(&a);
+      lv_anim_set_var(&a, flap);
+      lv_anim_set_time(&a, 450);
+      lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+
+      lv_anim_set_values(&a, 0, SS_FLAP_H);
+      lv_anim_set_exec_cb(&a, flap_h_anim_cb);
+      lv_anim_start(&a);
+
+      lv_anim_set_values(&a, LV_OPA_20, LV_OPA_COVER);
+      lv_anim_set_exec_cb(&a, flap_opa_anim_cb);
+      lv_anim_start(&a);
     };
 
     if (flip_hour_tens_lbl) update_flap(flip_hour_tens_lbl, h1, last_h1);

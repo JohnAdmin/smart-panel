@@ -3,6 +3,7 @@
 #include "lang.h"
 #include "scene.h"
 #include "ui/ui_helpers.h"
+#include "ui/ui_nav_rail.h"
 #include "ui/ui_screens.h"
 #include "ui/ui_wallpaper.h"
 #include "wifi_manager.h"
@@ -34,14 +35,6 @@ lv_obj_t *device_labels[MAX_DEVICES];
 lv_obj_t *device_status_labels[MAX_DEVICES];
 lv_obj_t *device_level_bars[MAX_DEVICES]; // brightness bar; NULL if not dimmable
 
-// Favorite tile mirrors
-lv_obj_t *fav_tiles[MAX_DEVICES];
-lv_obj_t *fav_icon_containers[MAX_DEVICES];
-lv_obj_t *fav_icons[MAX_DEVICES];
-lv_obj_t *fav_labels[MAX_DEVICES];
-lv_obj_t *fav_status_labels[MAX_DEVICES];
-lv_obj_t *fav_level_bars[MAX_DEVICES];
-
 // --- Settings ---
 lv_obj_t *set_container = NULL;
 lv_obj_t *ta_ssid = NULL, *ta_pass = NULL, *ta_mqtt_srv = NULL,
@@ -56,28 +49,21 @@ lv_obj_t *device_list_container = NULL;
 
 const char *icon_names = nullptr; // set at runtime from L(L_ICON_NAMES)
 
+// Header title — the panel name today, the page name once the rail's other
+// destinations get their own headers (Phase 3).
+lv_obj_t *header_label_title = NULL;
 // Status-bar chip indicator (colour tracks the active-device count)
 static lv_obj_t *s_hdr_count_dot = NULL;
-// Clock block: AM/PM flag plus the rule that separates clock from date. Both
-// shift depending on whether the meridiem is showing.
+// AM/PM flag. It lives in the header's right-hand flex row, so it can be shown
+// and hidden without anything around it needing to be re-aligned — the old
+// 44 px header positioned every element absolutely and had to shuffle the rule
+// and date by hand whenever the time format changed.
 static lv_obj_t *s_hdr_meridiem = NULL;
-static lv_obj_t *s_hdr_rule = NULL;
-
-// Positions the rule and date for the current time format. 12-hour mode needs
-// ~28 px more room after the clock for the AM/PM flag.
-static void hdr_layout_time_block() {
-  if (!s_hdr_rule || !header_label_date)
-    return;
-  const bool ampm = (currentMeridiem[0] != '\0');
-  lv_obj_align(s_hdr_rule, LV_ALIGN_LEFT_MID, ampm ? 114 : 92, 0);
-  lv_obj_align(header_label_date, LV_ALIGN_LEFT_MID, ampm ? 126 : 104, 1);
-}
+// Signal strength in dBm, beside the Wi-Fi glyph
+static lv_obj_t *s_hdr_rssi = NULL;
 
 // Settings header labels (need refresh on language change)
 static lv_obj_t *s_lbl_settings_title = NULL;
-static lv_obj_t *s_lbl_btn_dev = NULL;
-static lv_obj_t *s_lbl_btn_scenes = NULL;
-static lv_obj_t *s_lbl_btn_sched = NULL;
 static lv_obj_t *s_lbl_btn_save = NULL;
 
 // ========================================================
@@ -101,12 +87,26 @@ void ui_init() {
   // Must be called BEFORE header and tiles so it sits behind them.
   ui_wallpaper_load(ui_ScreenMain);
 
+  // ── NAV RAIL ──
+  // Built before the header so the header can sit flush against it. It owns
+  // the left 52 px of every screen that carries one.
+  ui_nav_rail_create(ui_ScreenMain, UI_NAV_HOME);
+
   // ── STATUS BAR ──
-  // Left: clock + date, separated by a hairline rule.
-  // Right: connectivity glyphs, the active-device chip, then settings.
+  // A 38 px strip filling the width right of the rail.
+  //   Left  — the panel name.
+  //   Right — one flex row: device count, Wi-Fi + RSSI, MQTT, clock.
+  // The right side is a flex row rather than a set of absolute offsets because
+  // the AM/PM flag comes and goes with the time format; flex re-packs the row
+  // on its own instead of every neighbour needing a hand-tuned x.
+  //
+  // The date came off the header when it shrank from 44 px to 38 px: at this
+  // height only one line fits, and clock + date + status will not share it.
+  // The screensaver still shows the full date, and Phase 2's home screen
+  // brings it back into the body.
   lv_obj_t *header = lv_obj_create(ui_ScreenMain);
-  lv_obj_set_size(header, SCREEN_WIDTH, UI_HEADER_HEIGHT);
-  lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_size(header, UI_CONTENT_W, UI_HEADER_HEIGHT);
+  lv_obj_align(header, LV_ALIGN_TOP_RIGHT, 0, 0);
   lv_obj_set_style_bg_color(header, lv_color_hex(CLR_HEX_SURFACE_0), 0);
   lv_obj_set_style_bg_opa(header, LV_OPA_80, 0); // frosted over the wallpaper
   lv_obj_set_style_border_color(header, lv_color_hex(CLR_HEX_HAIRLINE), 0);
@@ -118,72 +118,90 @@ void ui_init() {
   lv_obj_set_style_pad_all(header, 0, 0);
   lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Time — the anchor of the whole screen: largest type, highest contrast.
-  // Amber is reserved for device state, so the clock stays neutral white.
-  header_label_time = lv_label_create(header);
-  lv_label_set_text(header_label_time, "00:00");
-  lv_obj_set_style_text_font(header_label_time, &lv_font_montserrat_24, 0);
-  lv_obj_set_style_text_color(header_label_time, lv_color_hex(CLR_HEX_TEXT_HI), 0);
-  lv_obj_set_style_text_letter_space(header_label_time, 1, 0);
-  lv_obj_align(header_label_time, LV_ALIGN_LEFT_MID, 14, 0);
+  // Panel name — the only thing on the left of the bar
+  header_label_title = lv_label_create(header);
+  lv_label_set_text(header_label_title, panelTitle);
+  lv_obj_set_style_text_font(header_label_title, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(header_label_title, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_label_set_long_mode(header_label_title, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(header_label_title, UI_HDR_TITLE_W);
+  lv_obj_align(header_label_title, LV_ALIGN_LEFT_MID, 12, 0);
 
-  // AM/PM — only present in 12-hour mode, sits tight to the clock
-  s_hdr_meridiem = lv_label_create(header);
+  // Right-hand status row, packed against the right edge by flex so the AM/PM
+  // flag can come and go without any neighbour needing a hand-tuned x.
+  //
+  // Fixed width, not LV_SIZE_CONTENT: children are clipped to their parent's
+  // box, so if the shrink-wrap comes out short the row loses whichever items
+  // are furthest from the END edge — the count chip and the Wi-Fi glyph — and
+  // does it silently. Height is one less than the header so the 1 px bottom
+  // border isn't inside the row's content area.
+  lv_obj_t *hdr_right = lv_obj_create(header);
+  lv_obj_set_size(hdr_right, UI_HDR_STATUS_W, UI_HEADER_HEIGHT - 1);
+  lv_obj_align(hdr_right, LV_ALIGN_RIGHT_MID, -10, 0);
+  lv_obj_set_style_bg_opa(hdr_right, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(hdr_right, 0, 0);
+  lv_obj_set_style_pad_all(hdr_right, 0, 0);
+  lv_obj_set_style_pad_column(hdr_right, 7, 0);
+  lv_obj_clear_flag(hdr_right, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_flex_flow(hdr_right, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(hdr_right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+
+  // Active-device chip — dot + "n/n" (sized for the 100-device maximum)
+  lv_obj_t *count_chip = ui_create_chip(hdr_right, 60, 22);
+  s_hdr_count_dot = ui_create_dot(count_chip, 6, lv_color_hex(CLR_HEX_TEXT_LOW));
+  lv_obj_align(s_hdr_count_dot, LV_ALIGN_LEFT_MID, 8, 0);
+
+  header_label_count = lv_label_create(count_chip);
+  lv_label_set_text(header_label_count, "0/0");
+  lv_obj_set_style_text_font(header_label_count, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(header_label_count, lv_color_hex(CLR_HEX_TEXT_MID), 0);
+  lv_obj_align(header_label_count, LV_ALIGN_LEFT_MID, 19, 0);
+
+  // WiFi glyph + dBm — tinted by ui_update_header(). The font is set
+  // explicitly rather than inherited: LV_FONT_DEFAULT is the only build where
+  // these symbols exist, and a future change to it should not quietly turn
+  // these two into boxes.
+  header_label_wifi = lv_label_create(hdr_right);
+  lv_label_set_text(header_label_wifi, LV_SYMBOL_WIFI);
+  lv_obj_set_style_text_font(header_label_wifi, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(header_label_wifi, text_dim, 0);
+
+  s_hdr_rssi = lv_label_create(hdr_right);
+  lv_label_set_text(s_hdr_rssi, "--");
+  lv_obj_set_style_text_font(s_hdr_rssi, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(s_hdr_rssi, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+
+  header_label_mqtt = lv_label_create(hdr_right);
+  lv_label_set_text(header_label_mqtt, LV_SYMBOL_UPLOAD);
+  lv_obj_set_style_text_font(header_label_mqtt, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(header_label_mqtt, text_dim, 0);
+
+  // Clock. It is no longer the anchor of the screen — the screensaver, which
+  // is what the panel shows most of the time, carries the large clock.
+  header_label_time = lv_label_create(hdr_right);
+  lv_label_set_text(header_label_time, "00:00");
+  lv_obj_set_style_text_font(header_label_time, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_color(header_label_time, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+
+  // AM/PM — only present in 12-hour mode; hidden (not just blank) in 24-hour
+  // so flex reclaims its column gap too.
+  s_hdr_meridiem = lv_label_create(hdr_right);
   lv_label_set_text(s_hdr_meridiem, currentMeridiem);
   lv_obj_set_style_text_font(s_hdr_meridiem, &lv_font_montserrat_12, 0);
   lv_obj_set_style_text_color(s_hdr_meridiem, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
-  lv_obj_align(s_hdr_meridiem, LV_ALIGN_LEFT_MID, 86, 3);
+  if (currentMeridiem[0] == '\0')
+    lv_obj_add_flag(s_hdr_meridiem, LV_OBJ_FLAG_HIDDEN);
 
-  // Hairline separating clock from date
-  s_hdr_rule = ui_create_divider(header, 1);
-  lv_obj_set_size(s_hdr_rule, 1, 18);
+  // The date label no longer exists on this screen. ui_update_header() already
+  // guards on it, so leaving it NULL is the whole change.
+  header_label_date = NULL;
 
-  // Date — secondary weight beside the clock
-  header_label_date = lv_label_create(header);
-  lv_label_set_text(header_label_date, currentDate);
-  lv_obj_set_style_text_font(header_label_date, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(header_label_date, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-
-  // Rule and date shift right to make room for AM/PM; ui_update_header()
-  // re-runs this whenever the time format changes.
-  hdr_layout_time_block();
-
-  // MQTT + WiFi glyphs — tinted by ui_update_header()
-  header_label_mqtt = lv_label_create(header);
-  lv_label_set_text(header_label_mqtt, LV_SYMBOL_UPLOAD);
-  lv_obj_set_style_text_color(header_label_mqtt, text_dim, 0);
-  lv_obj_align(header_label_mqtt, LV_ALIGN_RIGHT_MID, -170, 0);
-
-  header_label_wifi = lv_label_create(header);
-  lv_label_set_text(header_label_wifi, LV_SYMBOL_WIFI);
-  lv_obj_set_style_text_color(header_label_wifi, text_dim, 0);
-  lv_obj_align(header_label_wifi, LV_ALIGN_RIGHT_MID, -144, 0);
-
-  // Active-device chip — dot + "n/n ON" (sized for the 100-device maximum)
-  lv_obj_t *count_chip = ui_create_chip(header, 86, 26);
-  lv_obj_align(count_chip, LV_ALIGN_RIGHT_MID, -50, 0);
-
-  s_hdr_count_dot = ui_create_dot(count_chip, 7, lv_color_hex(CLR_HEX_TEXT_LOW));
-  lv_obj_align(s_hdr_count_dot, LV_ALIGN_LEFT_MID, 9, 0);
-
-  header_label_count = lv_label_create(count_chip);
-  lv_label_set_text(header_label_count, "0/0 ON");
-  lv_obj_set_style_text_font(header_label_count, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_text_color(header_label_count, lv_color_hex(CLR_HEX_TEXT_MID), 0);
-  lv_obj_align(header_label_count, LV_ALIGN_LEFT_MID, 22, 0);
-
-  // Settings — quiet square glass button; it should never outshine the tiles
-  lv_obj_t *btn_set = ui_create_pill_btn(header, 36, 30,
-                                          LV_SYMBOL_SETTINGS,
-                                          lv_color_hex(CLR_HEX_TEXT_MID),
-                                          btn_settings_event_cb);
-  lv_obj_align(btn_set, LV_ALIGN_RIGHT_MID, -8, 0);
-  lv_obj_set_style_bg_opa(btn_set, LV_OPA_60, 0);
 
   // ── MAIN BODY CONTAINER ──
   main_body_container = lv_obj_create(ui_ScreenMain);
-  lv_obj_set_size(main_body_container, SCREEN_WIDTH, SCREEN_HEIGHT - UI_HEADER_HEIGHT);
-  lv_obj_align(main_body_container, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_size(main_body_container, UI_CONTENT_W, UI_CONTENT_H);
+  lv_obj_align(main_body_container, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
   lv_obj_set_style_bg_opa(main_body_container, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(main_body_container, 0, 0);
   lv_obj_set_style_pad_all(main_body_container, 0, 0);
@@ -215,69 +233,39 @@ void ui_init() {
     lv_obj_set_style_bg_opa(ui_ScreenSettings, LV_OPA_COVER, 0);
   }
 
-  // Settings header — frosted glass (using shared helper)
-  lv_obj_t *shdr = ui_create_frosted_header(ui_ScreenSettings, UI_SETTINGS_HDR_HEIGHT);
+  // Rail — Settings is one of its four destinations, so it no longer needs a
+  // back button of its own.
+  ui_nav_rail_create(ui_ScreenSettings, UI_NAV_SETTINGS);
 
-  // Back button — pill
-  lv_obj_t *btn_back = ui_create_pill_btn(shdr, UI_PILL_BTN_W, UI_PILL_BTN_H,
-                                           LV_SYMBOL_LEFT, CLR_PRIMARY,
-                                           btn_back_to_main_cb);
-  lv_obj_align(btn_back, LV_ALIGN_LEFT_MID, 8, 0);
+  // Settings header — same 38 px bar as Home: title left, Save right. The row
+  // of Devices/Scenes/Schedules pills that used to live here is gone; those
+  // are rail destinations and sidebar tabs now.
+  lv_obj_t *shdr = ui_create_frosted_header(ui_ScreenSettings, UI_HEADER_HEIGHT);
 
-  // Devices button — pill.
-  // Label colour comes from the token ramp, not CLR_TEXT_TITLE: the pill fill
-  // is CLR_HEX_PILL_BG in both themes, so a theme-aware label flipped to near
-  // black in light mode and left dark text on a dark pill. Same below.
-  lv_obj_t *btn_dev = ui_create_pill_btn(shdr, 90, UI_PILL_BTN_H,
-                                          "", lv_color_hex(CLR_HEX_TEXT_HI),
-                                          btn_goto_devices_cb);
-  s_lbl_btn_dev = lv_obj_get_child(btn_dev, 0);
-  lv_label_set_text_fmt(s_lbl_btn_dev, LV_SYMBOL_LIST " %s", L(L_DEVICES));
-  lv_obj_align(btn_dev, LV_ALIGN_RIGHT_MID, -290, 0);
-  lv_obj_set_style_text_font(s_lbl_btn_dev, &lv_font_montserrat_12, 0);
-
-  // Scenes button — pill
-  lv_obj_t *btn_scenes = ui_create_pill_btn(shdr, 80, UI_PILL_BTN_H,
-                                             "", lv_color_hex(CLR_HEX_TEXT_HI),
-                                             [](lv_event_t *e) {
-    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-      build_scene_list_screen();
-      if (ui_ScreenScenes)
-        lv_scr_load_anim(ui_ScreenScenes, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
-    }
-  });
-  s_lbl_btn_scenes = lv_obj_get_child(btn_scenes, 0);
-  lv_label_set_text_fmt(s_lbl_btn_scenes, LV_SYMBOL_VIDEO " %s", L(L_SCENES));
-  lv_obj_align(btn_scenes, LV_ALIGN_RIGHT_MID, -200, 0);
-  lv_obj_set_style_text_font(s_lbl_btn_scenes, &lv_font_montserrat_12, 0);
-
-  // Schedules button — pill
-  lv_obj_t *btn_sched = ui_create_pill_btn(shdr, 90, UI_PILL_BTN_H,
-                                            "", lv_color_hex(CLR_HEX_TEXT_HI),
-                                            [](lv_event_t *e) {
-    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-      build_schedule_list_screen();
-    }
-  });
-  s_lbl_btn_sched = lv_obj_get_child(btn_sched, 0);
-  lv_label_set_text_fmt(s_lbl_btn_sched, LV_SYMBOL_LOOP " %s", L(L_SCHED));
-  lv_obj_align(btn_sched, LV_ALIGN_RIGHT_MID, -108, 0);
-  lv_obj_set_style_text_font(s_lbl_btn_sched, &lv_font_montserrat_12, 0);
+  lv_obj_t *shdr_title = lv_label_create(shdr);
+  lv_label_set_text(shdr_title, L(L_SETTINGS));
+  lv_obj_set_style_text_font(shdr_title, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(shdr_title, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_obj_align(shdr_title, LV_ALIGN_LEFT_MID, 12, 0);
+  s_lbl_settings_title = shdr_title;
 
   // Save button — accent
-  lv_obj_t *btn_sv = ui_create_accent_btn(shdr, 90, UI_PILL_BTN_H, "",
+  lv_obj_t *btn_sv = ui_create_accent_btn(shdr, 84, 26, "",
                                           btn_save_settings_cb);
-  lv_obj_align(btn_sv, LV_ALIGN_RIGHT_MID, -8, 0);
+  lv_obj_align(btn_sv, LV_ALIGN_RIGHT_MID, -10, 0);
   s_lbl_btn_save = lv_obj_get_child(btn_sv, 0);
   lv_label_set_text_fmt(s_lbl_btn_save, LV_SYMBOL_OK " %s", L(L_SAVE));
 
-  // Settings body
+  // Tab sidebar, then the content area it drives
+  build_settings_sidebar(ui_ScreenSettings);
+
   set_container = lv_obj_create(ui_ScreenSettings);
-  lv_obj_set_size(set_container, SCREEN_WIDTH, SCREEN_HEIGHT - UI_SETTINGS_HDR_HEIGHT);
-  lv_obj_align(set_container, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_size(set_container, UI_SETTINGS_W, UI_CONTENT_H);
+  lv_obj_align(set_container, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
   lv_obj_set_style_bg_opa(set_container, LV_OPA_TRANSP,
                           0); // Transparent for wallpaper
   lv_obj_set_style_border_width(set_container, 0, 0);
+  lv_obj_set_style_pad_all(set_container, 0, 0);
   build_settings_screen();
 
   // Init nullable screens
@@ -285,11 +273,21 @@ void ui_init() {
   ui_ScreenEditDevice = NULL;
   ui_ScreenScenes = NULL;
   ui_ScreenEditScene = NULL;
-  ui_ScreenSchedules = NULL;
   ui_ScreenSaver = NULL;
   ui_DimmerModal = NULL;
 
   lv_scr_load_anim(ui_ScreenMain, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
+}
+
+// ========================================================
+//  HEADER TITLE
+// ========================================================
+// The header names whichever view main_body_container is showing — the panel
+// on Home, the room inside a room. Views call this as they build.
+void ui_set_header_title(const char *title) {
+  if (!header_label_title || !title) return;
+  if (strcmp(lv_label_get_text(header_label_title), title) == 0) return;
+  lv_label_set_text(header_label_title, title);
 }
 
 // ========================================================
@@ -298,11 +296,17 @@ void ui_init() {
 void ui_update_header() {
   if (header_label_time == NULL)
     return;
+
   lv_label_set_text(header_label_time, currentTime);
   if (s_hdr_meridiem &&
       strcmp(lv_label_get_text(s_hdr_meridiem), currentMeridiem) != 0) {
     lv_label_set_text(s_hdr_meridiem, currentMeridiem);
-    hdr_layout_time_block(); // only when the format actually flips
+    // Hide rather than blank it: an empty label still occupies a flex column
+    // gap, which would leave a 7 px hole beside the clock in 24-hour mode.
+    if (currentMeridiem[0] == '\0')
+      lv_obj_add_flag(s_hdr_meridiem, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_clear_flag(s_hdr_meridiem, LV_OBJ_FLAG_HIDDEN);
   }
   // Connectivity glyphs are tinted, not recoloured with markup — muted when
   // healthy so they read as ambient status, loud only when something is wrong.
@@ -312,8 +316,10 @@ void ui_update_header() {
     else if (wifiRssi >= -75) wc = lv_color_hex(CLR_HEX_ACCENT);  // fair
     else                      wc = lv_color_hex(CLR_HEX_ACCENT_HI); // weak
     lv_obj_set_style_text_color(header_label_wifi, wc, 0);
+    if (s_hdr_rssi) lv_label_set_text_fmt(s_hdr_rssi, "%d", wifiRssi);
   } else {
     lv_obj_set_style_text_color(header_label_wifi, lv_color_hex(CLR_HEX_DANGER), 0);
+    if (s_hdr_rssi) lv_label_set_text(s_hdr_rssi, "--");
   }
   lv_obj_set_style_text_color(header_label_mqtt,
                               isMqttConnected ? lv_color_hex(CLR_HEX_OK)
@@ -328,7 +334,9 @@ void ui_update_header() {
     int cnt = 0, total = 0;
     ui_count_visible_devices(&cnt, &total);
     char cbuf[24];
-    snprintf(cbuf, sizeof(cbuf), "%d/%d ON", cnt, total);
+    // "ON" dropped with the narrower header — the amber dot beside the numbers
+    // already says which of them is the live count.
+    snprintf(cbuf, sizeof(cbuf), "%d/%d", cnt, total);
     lv_label_set_text(header_label_count, cbuf);
     lv_color_t cc = cnt > 0 ? lv_color_hex(CLR_HEX_ACCENT)
                             : lv_color_hex(CLR_HEX_TEXT_LOW);
@@ -344,12 +352,16 @@ void ui_update_header() {
 // ========================================================
 void ui_refresh_lang() {
   icon_names = L(L_ICON_NAMES);
-  if (s_lbl_btn_dev)
-    lv_label_set_text_fmt(s_lbl_btn_dev, LV_SYMBOL_LIST " %s", L(L_DEVICES));
-  if (s_lbl_btn_scenes)
-    lv_label_set_text_fmt(s_lbl_btn_scenes, LV_SYMBOL_VIDEO " %s", L(L_SCENES));
-  if (s_lbl_btn_sched)
-    lv_label_set_text_fmt(s_lbl_btn_sched, LV_SYMBOL_LOOP " %s", L(L_SCHED));
+  // The panel name reaches the UI in two places now — the header title and the
+  // rail's monogram — and the web portal can change it without a reboot.
+  if (header_label_title)
+    lv_label_set_text(header_label_title, panelTitle);
+  ui_nav_rail_refresh_logo();
+  if (s_lbl_settings_title)
+    lv_label_set_text(s_lbl_settings_title, L(L_SETTINGS));
+  // The settings sidebar is built once with its screen, so it does not get
+  // re-created the way the tab bodies do.
+  ui_settings_refresh_chrome();
   if (s_lbl_btn_save)
     lv_label_set_text_fmt(s_lbl_btn_save, LV_SYMBOL_OK " %s", L(L_SAVE));
   rebuild_grid();

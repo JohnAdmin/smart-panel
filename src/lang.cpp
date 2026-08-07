@@ -38,6 +38,11 @@ static const char *defaults[LANG_KEY_COUNT] = {
   // %s is the room name
   [L_CONFIRM_ALL_OFF_MSG] = "Switch off every device in %s?",
   [L_NOTHING_ON]    = "Nothing is on",
+  [L_FAVORITES]     = "Favorites",
+  // %d is the number of devices currently on in that room
+  [L_ON_COUNT]      = "%d on",
+  [L_NONE_ON]       = "All off",
+  [L_NO_ROOMS]      = "No rooms yet.\nGive your devices a room name\nin the web portal.",
 
   // --- Settings ---
   [L_SETTINGS]      = "Settings",
@@ -54,17 +59,33 @@ static const char *defaults[LANG_KEY_COUNT] = {
   [L_TIME_12H]      = "12 Hour",
   [L_TIME_24H]      = "24 Hour",
   [L_SCREENSAVER]   = "Screensaver",
-  [L_FLIP_CLOCK]    = "Flip Clock",
-  [L_MINIMAL]       = "Minimal",
-  [L_SCREEN_OFF]    = "Screen Off",
+  [L_FLIP_CLOCK]    = "Flip",
+  [L_MINIMAL]       = "Plain",
+  [L_SCREEN_OFF]    = "Off",
   [L_SCREEN_TIMEOUT]= "Screen Timeout",
-  [L_1_MIN]         = "1 Min",
-  [L_2_MIN]         = "2 Min",
-  [L_5_MIN]         = "5 Min",
+  [L_1_MIN]         = "1m",
+  [L_2_MIN]         = "2m",
+  [L_5_MIN]         = "5m",
   [L_NEVER]         = "Never",
   [L_RESET_PASS]    = "Reset Pass",
   [L_LANGUAGE]      = "Language",
   [L_HAPTIC]        = "Haptic",
+  [L_DISPLAY]       = "Display",
+  [L_SYSTEM]        = "System",
+  [L_MANAGE]        = "Manage",
+  [L_HOME_LAYOUT]   = "Home Layout",
+  [L_LAYOUT_GRID]   = "Grid",
+  [L_LAYOUT_LIST]   = "List",
+  [L_WALLPAPER]     = "Wallpaper",
+
+  [L_PANEL_NAME]    = "Panel Name",
+  [L_PANEL_NAME_EMPTY] = "Name cannot be empty",
+  [L_RESTART]       = "Restart",
+  [L_CONFIRM_RESTART] = "Restart the panel now?",
+  [L_FACTORY_RESET] = "Factory Reset",
+  [L_CONFIRM_FACTORY_RESET] =
+      "Erase all devices, rooms, scenes and settings?",
+  [L_UPDATING]      = "Updating",
 
   // --- Device Manager ---
   [L_DEVICES]       = "Devices",
@@ -79,8 +100,17 @@ static const char *defaults[LANG_KEY_COUNT] = {
   [L_DIMMER_TOPIC]  = "Dimmer Topic (optional)",
   [L_DIMMER_TOPIC_HINT] = "homebridge/name/dimmer",
   [L_ICON_TYPE]     = "Icon Type",
+  [L_DEV_TYPE]      = "Type",
+  [L_TYPE_TOGGLE]   = "Switch",
+  [L_TYPE_DIMMER]   = "Dimmer",
+  [L_TYPE_FAN]      = "Fan",
+  [L_TYPE_AC]       = "AC",
+  // %d is the fan speed, 1-3
+  [L_SPEED]         = "Speed %d",
+  [L_COOLING]       = "Cooling",
   [L_CONFIRM_DELETE]= "Confirm Delete",
   [L_CONFIRM_DELETE_MSG] = "Are you sure you want to delete this device?",
+  [L_CONFIRM_DELETE_SCHED] = "Delete this schedule?",
 
   // --- Dimmer ---
   [L_BRIGHTNESS_CTRL] = "Brightness Control",
@@ -113,6 +143,7 @@ static const char *defaults[LANG_KEY_COUNT] = {
 
   // --- Screensaver ---
   [L_SMART_HOME]    = "SMART HOME",
+  [L_TAP_TO_WAKE]   = "Tap to unlock",
 
   // --- UI General ---
   [L_ICON_NAMES]    = "Lamp\nFan\nSwitch\nPlug\nThermostat\nLock\nTV\nGarage\nLight Strip\nGeneric",
@@ -164,6 +195,8 @@ static const char *key_names[LANG_KEY_COUNT] = {
   [L_NO_DEVICES]="no_devices", [L_FAV_HINT]="fav_hint",
   [L_ALL_OFF]="all_off", [L_CONFIRM_ALL_OFF]="confirm_all_off",
   [L_CONFIRM_ALL_OFF_MSG]="confirm_all_off_msg", [L_NOTHING_ON]="nothing_on",
+  [L_FAVORITES]="favorites", [L_ON_COUNT]="on_count",
+  [L_NONE_ON]="none_on", [L_NO_ROOMS]="no_rooms",
 
   [L_SETTINGS]="settings", [L_WEB_PORTAL]="web_portal",
   [L_PANEL_SETTINGS]="panel_settings", [L_WIFI_SETUP]="wifi_setup",
@@ -176,16 +209,29 @@ static const char *key_names[LANG_KEY_COUNT] = {
   [L_SCREEN_OFF]="screen_off", [L_SCREEN_TIMEOUT]="screen_timeout",
   [L_1_MIN]="1_min", [L_2_MIN]="2_min", [L_5_MIN]="5_min",
   [L_NEVER]="never", [L_RESET_PASS]="reset_pass", [L_LANGUAGE]="language",
-  [L_HAPTIC]="haptic",
+  [L_HAPTIC]="haptic", [L_DISPLAY]="display", [L_SYSTEM]="system",
+  [L_MANAGE]="manage", [L_HOME_LAYOUT]="home_layout",
+  [L_LAYOUT_GRID]="layout_grid", [L_LAYOUT_LIST]="layout_list",
+  [L_WALLPAPER]="wallpaper",
 
+  [L_PANEL_NAME]="panel_name", [L_PANEL_NAME_EMPTY]="panel_name_empty",
+  [L_RESTART]="restart", [L_CONFIRM_RESTART]="confirm_restart",
+  [L_FACTORY_RESET]="factory_reset",
+  [L_CONFIRM_FACTORY_RESET]="confirm_factory_reset",
+  [L_UPDATING]="updating",
   [L_DEVICES]="devices", [L_NEW_DEVICE]="new_device",
   [L_EDIT_DEVICE]="edit_device", [L_DEVICE_NAME]="device_name",
   [L_DEVICE_NAME_HINT]="device_name_hint",
   [L_STATE_TOPIC]="state_topic", [L_STATE_TOPIC_HINT]="state_topic_hint",
   [L_CMD_TOPIC]="cmd_topic", [L_CMD_TOPIC_HINT]="cmd_topic_hint",
   [L_DIMMER_TOPIC]="dimmer_topic", [L_DIMMER_TOPIC_HINT]="dimmer_topic_hint",
-  [L_ICON_TYPE]="icon_type", [L_CONFIRM_DELETE]="confirm_delete",
+  [L_ICON_TYPE]="icon_type", [L_DEV_TYPE]="dev_type",
+  [L_TYPE_TOGGLE]="type_toggle", [L_TYPE_DIMMER]="type_dimmer",
+  [L_TYPE_FAN]="type_fan", [L_TYPE_AC]="type_ac",
+  [L_SPEED]="speed", [L_COOLING]="cooling",
+  [L_CONFIRM_DELETE]="confirm_delete",
   [L_CONFIRM_DELETE_MSG]="confirm_delete_msg",
+  [L_CONFIRM_DELETE_SCHED]="confirm_delete_sched",
 
   [L_BRIGHTNESS_CTRL]="brightness_ctrl",
   [L_TAP_OUTSIDE_CLOSE]="tap_outside_close",
@@ -204,7 +250,7 @@ static const char *key_names[LANG_KEY_COUNT] = {
   [L_DAY_SU]="day_su", [L_DAY_MO]="day_mo", [L_DAY_TU]="day_tu",
   [L_DAY_WE]="day_we", [L_DAY_TH]="day_th", [L_DAY_FR]="day_fr", [L_DAY_SA]="day_sa",
 
-  [L_SMART_HOME]="smart_home",
+  [L_SMART_HOME]="smart_home", [L_TAP_TO_WAKE]="tap_to_wake",
   [L_ICON_NAMES]="icon_names",
 
   [L_WEB_TITLE]="web_title", [L_WEB_SAVE_RESTART]="web_save_restart",

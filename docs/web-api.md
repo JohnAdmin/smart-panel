@@ -11,6 +11,7 @@ Auth, default `admin` / `admin`.
 |--------|----------|---------|
 | GET/PUT | `/api/config` | WiFi, MQTT, timezone, theme settings |
 | GET/POST | `/api/devices` | Device list + bulk import |
+| GET/POST | `/api/rooms` | Room icon + climate topic (matched by name; restart to re-subscribe) |
 | PUT/DELETE | `/api/devices/:id` | Edit/delete device |
 | GET/POST | `/api/scenes` | Scene list + create |
 | PUT/DELETE | `/api/scenes/:id` | Edit/delete scene |

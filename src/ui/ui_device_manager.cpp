@@ -2,6 +2,7 @@
 #include "../lang.h"
 #include "../wifi_manager.h" // pulls in globals.h → deviceCount, devices, etc.
 #include "ui_helpers.h"
+#include "ui_nav_rail.h"
 #include "ui_screens.h"
 #include <string.h>
 
@@ -15,6 +16,101 @@ extern lv_obj_t *kb_edit;
 static int editDeviceIndex = -1;
 static int device_to_delete = -1;
 static lv_obj_t *dev_count_lbl = NULL;
+
+// ── Inline rename ───────────────────────────────────────
+// Tapping a name swaps it for a textarea rather than opening the full edit
+// form: renaming is the one thing people do often, and it does not need the
+// topic fields. The full form is still one tap away on the Edit pill.
+static lv_obj_t *kb_list = NULL;
+static int rename_index = -1;
+
+// Re-rendering destroys the widget that dispatched the event, so it waits for
+// LVGL to finish the dispatch. Tearing the keyboard down here rather than in
+// the callback is the same reason.
+static void relist_async(void *unused) {
+  (void)unused;
+  if (kb_list) {
+    lv_obj_del(kb_list);
+    kb_list = NULL;
+  }
+  build_device_list_screen();
+  rebuild_grid(); // tiles and room cards carry the name too
+}
+
+static void rename_ta_cb(lv_event_t *e) {
+  const lv_event_code_t code = lv_event_get_code(e);
+  const bool commit = (code == LV_EVENT_READY || code == LV_EVENT_DEFOCUSED);
+  if (!commit && code != LV_EVENT_CANCEL) return;
+  if (rename_index < 0) return; // the other event already handled it
+
+  const int idx = rename_index;
+  rename_index = -1; // READY is followed by DEFOCUSED — act once
+
+  if (commit) {
+    String n = lv_textarea_get_text(lv_event_get_target(e));
+    n.trim();
+    if (n.isEmpty()) {
+      ui_show_toast(L(L_PANEL_NAME_EMPTY)); // keeps the old name
+    } else if (idx < deviceCount) {
+      strncpy(devices[idx].name, n.c_str(), sizeof(devices[0].name) - 1);
+      devices[idx].name[sizeof(devices[0].name) - 1] = '\0';
+      saveDevices();
+    }
+  }
+  lv_async_call(relist_async, NULL);
+}
+
+static void name_tap_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  const int idx = (int)(ptrdiff_t)lv_event_get_user_data(e);
+  if (idx < 0 || idx >= deviceCount) return;
+  rename_index = idx;
+
+  // The label is hidden, never deleted: it is the object currently dispatching
+  // this event, and freeing it here would leave LVGL walking a dead pointer.
+  // relist_async() rebuilds the row from scratch a moment later anyway.
+  lv_obj_t *lbl = lv_event_get_target(e);
+  lv_obj_t *row = lv_obj_get_parent(lbl);
+  lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *ta = lv_textarea_create(row);
+  lv_obj_set_size(ta, 196, 34);
+  lv_obj_align(ta, LV_ALIGN_LEFT_MID, 50, 0);
+  lv_textarea_set_one_line(ta, true);
+  lv_textarea_set_text(ta, devices[idx].name);
+  lv_obj_set_style_bg_color(ta, lv_color_hex(CLR_HEX_SURFACE_2), 0);
+  lv_obj_set_style_border_color(ta, lv_color_hex(CLR_HEX_ACCENT), 0);
+  lv_obj_set_style_border_width(ta, 1, 0);
+  lv_obj_set_style_radius(ta, 8, 0);
+  lv_obj_set_style_text_color(ta, lv_color_hex(CLR_HEX_TEXT_HI), 0);
+  lv_obj_set_style_text_font(ta, &lv_font_montserrat_14, 0);
+  ui_style_textarea_states(ta);
+  lv_obj_add_event_cb(ta, rename_ta_cb, LV_EVENT_ALL, NULL);
+
+  if (kb_list) lv_obj_del(kb_list);
+  kb_list = lv_keyboard_create(lv_obj_get_screen(row));
+  ui_style_keyboard(kb_list);
+  lv_obj_set_size(kb_list, SCREEN_WIDTH, 136);
+  lv_obj_align(kb_list, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_move_foreground(kb_list);
+  lv_keyboard_set_textarea(kb_list, ta);
+}
+
+// Tapping the room chip moves the device to the next room. Cycling suits the
+// three or four rooms a panel usually has; past about six it wants a picker,
+// so the chip falls back to a no-op rather than becoming a guessing game.
+static void room_chip_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  const int idx = (int)(ptrdiff_t)lv_event_get_user_data(e);
+  if (idx < 0 || idx >= deviceCount || roomCount < 2) return;
+
+  int cur = room_find(devices[idx].room);
+  int next = (cur < 0) ? 0 : (cur + 1) % roomCount;
+  strncpy(devices[idx].room, rooms[next].name, sizeof(devices[0].room) - 1);
+  devices[idx].room[sizeof(devices[0].room) - 1] = '\0';
+  saveDevices();
+  lv_async_call(relist_async, NULL);
+}
 
 static void _del_old_screen(void *obj) { if (obj) lv_obj_del((lv_obj_t *)obj); }
 
@@ -31,6 +127,9 @@ void cleanup_device_screen() {
     device_list_container = NULL;
     dev_count_lbl = NULL;
   }
+  // The rename keyboard is parented to the screen, so it goes with it.
+  kb_list = NULL;
+  rename_index = -1;
 }
 
 void btn_back_to_settings_cb(lv_event_t *e) {
@@ -148,7 +247,6 @@ static void ta_event_cb(lv_event_t *e) {
 void build_device_list_screen() {
   // Free other sub-screens first to keep LVGL heap healthy
   cleanup_scene_screen();
-  cleanup_schedule_screen();
   // Free screensaver if lingering
   if (ui_ScreenSaver) { lv_anim_del(ui_ScreenSaver, NULL); lv_obj_del(ui_ScreenSaver); ui_ScreenSaver = NULL; }
 
@@ -172,6 +270,8 @@ void build_device_list_screen() {
 
   // ── First time: create screen + header (persists) ──
   ui_ScreenDevices = lv_obj_create(NULL);
+  // Rail first, so the header and body that follow stack above it.
+  ui_nav_rail_create(ui_ScreenDevices, UI_NAV_SETTINGS);
 
   // Deep black background
   lv_obj_set_style_bg_color(ui_ScreenDevices, CLR_BG_DEEP, 0);
@@ -223,8 +323,8 @@ void build_device_list_screen() {
 
   // ── Scrollable list ─────────────────────────
   device_list_container = lv_obj_create(ui_ScreenDevices);
-  lv_obj_set_size(device_list_container, SCREEN_WIDTH, SCREEN_HEIGHT - 52);
-  lv_obj_align(device_list_container, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_size(device_list_container, UI_CONTENT_W, SCREEN_HEIGHT - 52);
+  lv_obj_align(device_list_container, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
   lv_obj_set_flex_flow(device_list_container, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_pad_all(device_list_container, 10, 0);
   lv_obj_set_style_pad_row(device_list_container, 6, 0);
@@ -237,8 +337,13 @@ populate:
   for (int i = 0; i < deviceCount; i++) {
     // Glass card row
     lv_obj_t *row = lv_obj_create(device_list_container);
-    lv_obj_set_size(row, SCREEN_WIDTH - 24, 54);
+    lv_obj_set_size(row, UI_CONTENT_W - 24, 54);
     ui_style_surface(row, 14);
+    // Zero the padding explicitly. Every child below is placed with absolute
+    // offsets from the row's edges, and LEFT/RIGHT alignment both measure from
+    // the *content* box — so a theme-supplied pad of P shrinks the gap between
+    // the room chip and the Edit pill by 2P and silently overlaps them.
+    lv_obj_set_style_pad_all(row, 0, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
     // Icon in amber circle
@@ -258,14 +363,44 @@ populate:
     lv_obj_set_style_text_color(ico, CLR_PRIMARY, 0);
     lv_obj_center(ico);
 
-    // Name
+    // Name — tap to rename in place
     lv_obj_t *nm = lv_label_create(row);
     lv_label_set_text(nm, devices[i].name);
     lv_obj_set_style_text_color(nm, lv_color_hex(CLR_HEX_TEXT_HI), 0);
     lv_obj_set_style_text_font(nm, &lv_font_montserrat_14, 0);
-    lv_obj_set_width(nm, 220);
+    lv_obj_set_width(nm, 142);
     lv_label_set_long_mode(nm, LV_LABEL_LONG_DOT);
     lv_obj_align(nm, LV_ALIGN_LEFT_MID, 52, 0);
+    // The label itself is the hit target, so give it some height to aim at.
+    lv_obj_set_height(nm, 30);
+    lv_obj_set_style_pad_top(nm, 7, 0);
+    lv_obj_add_flag(nm, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(nm, name_tap_cb, LV_EVENT_CLICKED,
+                        (void *)(ptrdiff_t)i);
+
+    // Room chip — tap cycles to the next room.
+    // Row is UI_CONTENT_W − 24 = 404 wide with padding now zeroed, so these
+    // offsets are exact: name 52..194, chip 200..284, Edit 298..346,
+    // Delete 350..398. The 14 px before Edit is deliberate slack — this row is
+    // the tightest in the UI and the last version overlapped by 4 px once the
+    // theme's own padding was counted twice.
+    lv_obj_t *chip = ui_create_chip(row, 84, 26);
+    lv_obj_align(chip, LV_ALIGN_LEFT_MID, 200, 0);
+    if (roomCount >= 2) {
+      lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_set_style_border_color(chip, lv_color_hex(CLR_HEX_ACCENT),
+                                    LV_STATE_PRESSED);
+      lv_obj_add_event_cb(chip, room_chip_cb, LV_EVENT_CLICKED,
+                          (void *)(ptrdiff_t)i);
+    }
+    lv_obj_t *chip_lbl = lv_label_create(chip);
+    lv_label_set_text(chip_lbl, devices[i].room[0] ? devices[i].room : "—");
+    lv_obj_set_style_text_font(chip_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(chip_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
+    lv_label_set_long_mode(chip_lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(chip_lbl, 72);
+    lv_obj_set_style_text_align(chip_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(chip_lbl);
 
     // Edit — dark pill
     lv_obj_t *btn_edit = ui_create_pill_btn(row, 48, UI_PILL_BTN_H,
@@ -291,6 +426,8 @@ void build_edit_device_screen() {
   if (ui_ScreenEditDevice)
     lv_obj_del(ui_ScreenEditDevice);
   ui_ScreenEditDevice = lv_obj_create(NULL);
+  // Rail first, so the header and body that follow stack above it.
+  ui_nav_rail_create(ui_ScreenEditDevice, UI_NAV_SETTINGS);
 
   // Deep black background
   lv_obj_set_style_bg_color(ui_ScreenEditDevice, CLR_BG_DEEP, 0);
@@ -320,8 +457,8 @@ void build_edit_device_screen() {
 
   // ── Scrollable form ─────────────────────────
   lv_obj_t *form = lv_obj_create(ui_ScreenEditDevice);
-  lv_obj_set_size(form, SCREEN_WIDTH, SCREEN_HEIGHT - 52);
-  lv_obj_align(form, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_size(form, UI_CONTENT_W, SCREEN_HEIGHT - 52);
+  lv_obj_align(form, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
   lv_obj_set_flex_flow(form, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_pad_all(form, 14, 0);
   lv_obj_set_style_pad_row(form, 4, 0);

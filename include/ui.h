@@ -25,11 +25,3 @@ extern lv_obj_t *device_icons[];
 extern lv_obj_t *device_labels[];
 extern lv_obj_t *device_status_labels[];
 extern lv_obj_t *device_level_bars[];
-
-// Favorite tile mirrors (for live updates on Home tab)
-extern lv_obj_t *fav_tiles[];
-extern lv_obj_t *fav_icon_containers[];
-extern lv_obj_t *fav_icons[];
-extern lv_obj_t *fav_labels[];
-extern lv_obj_t *fav_status_labels[];
-extern lv_obj_t *fav_level_bars[];
