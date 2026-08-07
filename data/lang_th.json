@@ -162,5 +162,14 @@
   "aqi_moderate": "ปานกลาง",
   "aqi_sensitive": "กลุ่มเสี่ยง",
   "aqi_unhealthy": "ไม่ดี",
-  "aqi_hazardous": "อันตราย"
+  "aqi_hazardous": "อันตราย",
+  "wx_clear": "แจ่มใส",
+  "wx_partly": "มีเมฆบางส่วน",
+  "wx_fog": "มีหมอก",
+  "wx_drizzle": "ฝนปรอย",
+  "wx_rain": "ฝนตก",
+  "wx_snow": "หิมะ",
+  "wx_showers": "ฝนซู่",
+  "wx_thunder": "ฝนฟ้าคะนอง",
+  "wx_storm": "พายุ"
 }

@@ -48,7 +48,11 @@ extern char currentMeridiem[4];
 
 // --- Weather ---
 extern float weatherTemp;
-extern char weatherDesc[32];
+// WMO weather code. The description is looked up from it at render time
+// rather than stored: a Thai condition can run to 42 bytes, which never fit
+// the old char[32], and translating late means a language switch shows up
+// immediately instead of after the next 30-minute fetch.
+extern int weatherCode;
 extern char weatherCity[32];
 extern char weatherCityName[32];
 extern bool weatherValid;

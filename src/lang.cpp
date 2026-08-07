@@ -142,6 +142,17 @@ static const char *defaults[LANG_KEY_COUNT] = {
   [L_DAY_SU] = "Su", [L_DAY_MO] = "Mo", [L_DAY_TU] = "Tu",
   [L_DAY_WE] = "We", [L_DAY_TH] = "Th", [L_DAY_FR] = "Fr", [L_DAY_SA] = "Sa",
 
+  // --- Weather (WMO code groups) ---
+  [L_WX_CLEAR]      = "Clear",
+  [L_WX_PARTLY]     = "Partly Cloudy",
+  [L_WX_FOG]        = "Foggy",
+  [L_WX_DRIZZLE]    = "Drizzle",
+  [L_WX_RAIN]       = "Rain",
+  [L_WX_SNOW]       = "Snow",
+  [L_WX_SHOWERS]    = "Showers",
+  [L_WX_THUNDER]    = "Thunderstorm",
+  [L_WX_STORM]      = "Storm",
+
   // --- Sensors ---
   [L_SENSORS]       = "Sensors",
   [L_AVG_TEMP]      = "Avg Temp",
@@ -267,6 +278,10 @@ static const char *key_names[LANG_KEY_COUNT] = {
   [L_DAY_SU]="day_su", [L_DAY_MO]="day_mo", [L_DAY_TU]="day_tu",
   [L_DAY_WE]="day_we", [L_DAY_TH]="day_th", [L_DAY_FR]="day_fr", [L_DAY_SA]="day_sa",
 
+  [L_WX_CLEAR]="wx_clear", [L_WX_PARTLY]="wx_partly", [L_WX_FOG]="wx_fog",
+  [L_WX_DRIZZLE]="wx_drizzle", [L_WX_RAIN]="wx_rain", [L_WX_SNOW]="wx_snow",
+  [L_WX_SHOWERS]="wx_showers", [L_WX_THUNDER]="wx_thunder",
+  [L_WX_STORM]="wx_storm",
   [L_SENSORS]="sensors", [L_AVG_TEMP]="avg_temp", [L_AVG_HUM]="avg_hum",
   [L_OUTDOOR]="outdoor", [L_NO_SENSORS]="no_sensors",
   [L_AIR_QUALITY]="air_quality", [L_AQI_GOOD]="aqi_good",

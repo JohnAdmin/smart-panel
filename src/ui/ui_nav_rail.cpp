@@ -5,28 +5,47 @@
 #include <Arduino.h>
 
 // ── Live rail registry ──────────────────────────────────
-// More than one screen can carry a rail, and each keeps its own monogram
-// label. The registry exists so ui_nav_rail_refresh_logo() can update all of
-// them without any screen having to publish its rail pointer. Slots are
-// cleared on LV_EVENT_DELETE, so a screen that gets torn down (every
-// sub-screen does — see the cleanup_* helpers) never leaves a dangling entry.
-#define UI_RAIL_MAX 4
-static lv_obj_t *s_logo_lbls[UI_RAIL_MAX] = {NULL};
+// More than one screen can carry a rail, and each keeps its own widgets. The
+// registry exists so the refresh helpers can reach all of them without any
+// screen having to publish its rail pointer. Slots are cleared on
+// LV_EVENT_DELETE, so a screen that gets torn down (every sub-screen does —
+// see the cleanup_* helpers) never leaves a dangling entry.
+// Main, Settings, a sub-screen and its edit form already reach four, and a
+// rail that fails to register keeps whatever highlight it was built with.
+#define UI_RAIL_MAX 6
+struct RailReg {
+  lv_obj_t *rail;
+  lv_obj_t *logo_lbl;
+  lv_obj_t *btn[UI_NAV_COUNT];
+  lv_obj_t *lbl[UI_NAV_COUNT];
+};
+static RailReg s_rails[UI_RAIL_MAX] = {};
+
 
 static void rail_deleted_cb(lv_event_t *e) {
-  lv_obj_t *lbl = (lv_obj_t *)lv_event_get_user_data(e);
+  lv_obj_t *rail = (lv_obj_t *)lv_event_get_user_data(e);
   for (int i = 0; i < UI_RAIL_MAX; i++)
-    if (s_logo_lbls[i] == lbl) s_logo_lbls[i] = NULL;
+    if (s_rails[i].rail == rail) s_rails[i] = RailReg{};
 }
 
-static void rail_register_logo(lv_obj_t *rail, lv_obj_t *lbl) {
+static RailReg *rail_register(lv_obj_t *rail) {
   for (int i = 0; i < UI_RAIL_MAX; i++) {
-    if (s_logo_lbls[i] == NULL) {
-      s_logo_lbls[i] = lbl;
-      lv_obj_add_event_cb(rail, rail_deleted_cb, LV_EVENT_DELETE, lbl);
-      return;
+    if (s_rails[i].rail == NULL) {
+      s_rails[i] = RailReg{};
+      s_rails[i].rail = rail;
+      lv_obj_add_event_cb(rail, rail_deleted_cb, LV_EVENT_DELETE, rail);
+      return &s_rails[i];
     }
   }
+  return NULL;
+}
+
+// Repaints one button for the current selection.
+static void rail_paint_btn(lv_obj_t *btn, lv_obj_t *lbl, bool active) {
+  if (!btn || !lbl) return;
+  lv_obj_set_style_bg_opa(btn, active ? (lv_opa_t)31 : LV_OPA_TRANSP, 0);
+  lv_obj_set_style_text_color(
+      lbl, lv_color_hex(active ? CLR_HEX_ACCENT : CLR_HEX_TEXT_LOW), 0);
 }
 
 // First visible character of the panel name, as a NUL-terminated UTF-8 string.
@@ -82,7 +101,8 @@ static void saver_btn_cb(lv_event_t *e) {
 // "this device is on", and a filled nav button would read as the same signal.
 static lv_obj_t *rail_btn(lv_obj_t *rail, const char *glyph, int y,
                           bool active, lv_event_cb_t cb, void *user_data,
-                          const lv_font_t *font = &lv_font_montserrat_18) {
+                          const lv_font_t *font = &lv_font_montserrat_18,
+                          lv_obj_t **out_lbl = nullptr) {
   lv_obj_t *btn = lv_btn_create(rail);
   lv_obj_set_size(btn, 38, 38);
   lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, y);
@@ -102,6 +122,7 @@ static lv_obj_t *rail_btn(lv_obj_t *rail, const char *glyph, int y,
                                                   : CLR_HEX_TEXT_LOW), 0);
   lv_obj_center(lbl);
   lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
+  if (out_lbl) *out_lbl = lbl;
   return btn;
 }
 
@@ -140,7 +161,8 @@ lv_obj_t *ui_nav_rail_create(lv_obj_t *screen, UiNavDest active) {
   lv_obj_set_style_text_font(logo_lbl, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(logo_lbl, lv_color_hex(CLR_HEX_ON_ACCENT), 0);
   lv_obj_center(logo_lbl);
-  rail_register_logo(rail, logo_lbl);
+  RailReg *reg = rail_register(rail);
+  if (reg) reg->logo_lbl = logo_lbl;
 
   // Four destinations, 38 px tall on a 42 px pitch, starting below the logo.
   // Sensors takes its glyph from the Material set — FontAwesome's subset here
@@ -152,11 +174,16 @@ lv_obj_t *ui_nav_rail_create(lv_obj_t *screen, UiNavDest active) {
       LV_SYMBOL_SETTINGS, // gear
   };
   glyphs[UI_NAV_SENSORS] = getIconSymbol(ICON_THERMOSTAT);
-  for (int i = 0; i < UI_NAV_COUNT; i++)
-    rail_btn(rail, glyphs[i], 48 + i * 42, active == (UiNavDest)i, nav_btn_cb,
-             (void *)(intptr_t)i,
-             i == UI_NAV_SENSORS ? &material_icons_font
-                                 : &lv_font_montserrat_18);
+  for (int i = 0; i < UI_NAV_COUNT; i++) {
+    lv_obj_t *lbl = NULL;
+    lv_obj_t *btn = rail_btn(rail, glyphs[i], 48 + i * 42,
+                             active == (UiNavDest)i, nav_btn_cb,
+                             (void *)(intptr_t)i,
+                             i == UI_NAV_SENSORS ? &material_icons_font
+                                                 : &lv_font_montserrat_18,
+                             &lbl);
+    if (reg) { reg->btn[i] = btn; reg->lbl[i] = lbl; }
+  }
 
   // Screensaver — an action, parked at the far end of the rail so it never
   // reads as a fifth destination.
@@ -167,9 +194,23 @@ lv_obj_t *ui_nav_rail_create(lv_obj_t *screen, UiNavDest active) {
   return rail;
 }
 
+// ui_ScreenMain's rail is built once and outlives every view switch that
+// happens inside it, so the selection has to be repainted rather than rebuilt.
+// Phase 1 assumed leaving Home always meant loading another screen; Scenes,
+// Schedule and Sensors later became views on that same screen, which left the
+// rail permanently highlighting Home.
+void ui_nav_rail_set_active(UiNavDest dest) {
+  if (dest < 0 || dest >= UI_NAV_COUNT) return;
+  for (int r = 0; r < UI_RAIL_MAX; r++) {
+    if (!s_rails[r].rail) continue;
+    for (int i = 0; i < UI_NAV_COUNT; i++)
+      rail_paint_btn(s_rails[r].btn[i], s_rails[r].lbl[i], i == (int)dest);
+  }
+}
+
 void ui_nav_rail_refresh_logo() {
   char mono[8];
   panel_monogram(mono, sizeof(mono));
   for (int i = 0; i < UI_RAIL_MAX; i++)
-    if (s_logo_lbls[i]) lv_label_set_text(s_logo_lbls[i], mono);
+    if (s_rails[i].logo_lbl) lv_label_set_text(s_rails[i].logo_lbl, mono);
 }

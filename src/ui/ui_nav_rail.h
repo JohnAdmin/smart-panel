@@ -32,5 +32,10 @@ enum UiNavDest {
 // uploaded.
 lv_obj_t *ui_nav_rail_create(lv_obj_t *screen, UiNavDest active);
 
+// Repaints which destination shows as selected, on every live rail. Needed
+// because the main screen's rail is built once and stays put while the views
+// under it change.
+void ui_nav_rail_set_active(UiNavDest dest);
+
 // Repaints the monogram on every live rail. Call after panelTitle changes.
 void ui_nav_rail_refresh_logo();

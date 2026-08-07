@@ -129,6 +129,17 @@ enum LangKey : uint8_t {
   L_UNKNOWN,
   L_DAY_SU, L_DAY_MO, L_DAY_TU, L_DAY_WE, L_DAY_TH, L_DAY_FR, L_DAY_SA,
 
+  // --- Weather (WMO code groups) ---
+  L_WX_CLEAR,
+  L_WX_PARTLY,
+  L_WX_FOG,
+  L_WX_DRIZZLE,
+  L_WX_RAIN,
+  L_WX_SNOW,
+  L_WX_SHOWERS,
+  L_WX_THUNDER,
+  L_WX_STORM,
+
   // --- Sensors ---
   L_SENSORS,
   L_AVG_TEMP,
