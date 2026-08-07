@@ -126,7 +126,8 @@ static const char *defaults[LANG_KEY_COUNT] = {
   [L_SCENE_NAME_HINT] = "e.g. Good Morning",
   [L_SCENE_ICON]    = "Icon",
   [L_SCENE_ICONS]   = "Morning\nNight\nLeave\nMovie\nParty\nCustom",
-  [L_SCENE_ACTIONS] = "Actions (MQTT Topic \xe2\x86\x92 Payload)",
+  // "->" not U+2192: the merged font has no arrow, so it drew as a box.
+  [L_SCENE_ACTIONS] = "Actions (MQTT Topic -> Payload)",
   [L_TOPIC]         = "Topic",
   [L_PAYLOAD]       = "Payload",
   [L_ACTION]        = "Action",
@@ -149,6 +150,13 @@ static const char *defaults[LANG_KEY_COUNT] = {
   [L_NO_SENSORS]    = "No room has a climate topic yet.\n"
                       "Add one per room in the web portal,\n"
                       "then restart the panel.",
+  [L_AIR_QUALITY]   = "Air Quality",
+  // US AQI bands
+  [L_AQI_GOOD]      = "Good",
+  [L_AQI_MODERATE]  = "Moderate",
+  [L_AQI_SENSITIVE] = "Sensitive",
+  [L_AQI_UNHEALTHY] = "Unhealthy",
+  [L_AQI_HAZARDOUS] = "Hazardous",
 
   // --- Screensaver ---
   [L_SMART_HOME]    = "SMART HOME",
@@ -261,6 +269,9 @@ static const char *key_names[LANG_KEY_COUNT] = {
 
   [L_SENSORS]="sensors", [L_AVG_TEMP]="avg_temp", [L_AVG_HUM]="avg_hum",
   [L_OUTDOOR]="outdoor", [L_NO_SENSORS]="no_sensors",
+  [L_AIR_QUALITY]="air_quality", [L_AQI_GOOD]="aqi_good",
+  [L_AQI_MODERATE]="aqi_moderate", [L_AQI_SENSITIVE]="aqi_sensitive",
+  [L_AQI_UNHEALTHY]="aqi_unhealthy", [L_AQI_HAZARDOUS]="aqi_hazardous",
   [L_SMART_HOME]="smart_home", [L_TAP_TO_WAKE]="tap_to_wake",
   [L_ICON_NAMES]="icon_names",
 

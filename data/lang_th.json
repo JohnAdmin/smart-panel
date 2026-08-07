@@ -72,7 +72,7 @@
   "scene_name_hint": "เช่น สวัสดีตอนเช้า",
   "scene_icon": "ไอคอน",
   "scene_icons": "เช้า\nกลางคืน\nออกจากบ้าน\nดูหนัง\nปาร์ตี้\nกำหนดเอง",
-  "scene_actions": "คำสั่ง (MQTT Topic → Payload)",
+  "scene_actions": "คำสั่ง (MQTT Topic -> Payload)",
   "topic": "Topic",
   "payload": "Payload",
   "action": "คำสั่ง",
@@ -156,5 +156,11 @@
   "avg_temp": "อุณหภูมิเฉลี่ย",
   "avg_hum": "ความชื้นเฉลี่ย",
   "outdoor": "นอกบ้าน",
-  "no_sensors": "ยังไม่มีห้องไหนตั้ง climate topic\nตั้งในเว็บพอร์ทัลแล้วรีสตาร์ทแผงควบคุม"
+  "no_sensors": "ยังไม่มีห้องไหนตั้ง climate topic\nตั้งในเว็บพอร์ทัลแล้วรีสตาร์ทแผงควบคุม",
+  "air_quality": "คุณภาพอากาศ",
+  "aqi_good": "ดี",
+  "aqi_moderate": "ปานกลาง",
+  "aqi_sensitive": "กลุ่มเสี่ยง",
+  "aqi_unhealthy": "ไม่ดี",
+  "aqi_hazardous": "อันตราย"
 }

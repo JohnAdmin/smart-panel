@@ -257,8 +257,20 @@ const char index_html[] PROGMEM = R"rawliteral(
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-slate-300 mb-1.5">Weather City <span class="text-[10px] text-slate-500 font-normal block">(Screensaver)</span></label>
-                            <input type="text" id="weather_city" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all placeholder-slate-500" placeholder="City">
+                            <label class="block text-sm font-medium text-slate-300 mb-1.5">Weather City <span class="text-[10px] text-slate-500 font-normal block">(Screensaver &amp; Air Quality)</span></label>
+                            <div id="city-field" class="relative">
+                                <input type="text" id="weather_city" autocomplete="off" oninput="onCityInput()" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all placeholder-slate-500" placeholder="Start typing a city...">
+                                <div id="city-results" class="hidden absolute z-20 mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto"></div>
+                                <div class="grid grid-cols-2 gap-2 mt-2">
+                                    <input type="number" step="any" id="weather_lat" oninput="onCoordInput()" class="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-primary placeholder-slate-600" placeholder="Latitude">
+                                    <input type="number" step="any" id="weather_lon" oninput="onCoordInput()" class="bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-primary placeholder-slate-600" placeholder="Longitude">
+                                </div>
+                                <div class="flex items-center justify-between mt-1 gap-2">
+                                    <span id="city-pinned" class="text-[10px] text-slate-500"></span>
+                                    <button type="button" onclick="clearCityCoords()" class="text-[10px] text-slate-500 hover:text-primary transition-colors whitespace-nowrap">Look up by name instead</button>
+                                </div>
+                                <p class="mt-1 text-[10px] text-slate-600">Pick a city above to fill these, or type coordinates for somewhere the search does not list &mdash; a Bangkok khet, a village, your own roof. Right-click a spot in Google Maps to read them off.</p>
+                            </div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-1.5">Panel Title</label>
@@ -924,6 +936,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             document.getElementById('mqtt_usr').value = data.mqtt_usr || '';
             document.getElementById('mqtt_pwd').value = data.mqtt_pwd || '';
             document.getElementById('weather_city').value = data.weather_city || '';
+            setCityCoords(data.weather_lat || 0, data.weather_lon || 0);
             document.getElementById('panel_title').value = data.panel_title || 'Hero Home Panel';
             document.getElementById('theme_dark').value = data.theme_dark !== undefined ? data.theme_dark.toString() : 'true';
             document.getElementById('large_tiles').value = data.large_tiles !== undefined ? data.large_tiles.toString() : 'false';
@@ -1058,6 +1071,106 @@ const char index_html[] PROGMEM = R"rawliteral(
         manageRooms();
         showToast('Renamed "' + oldName + '" -> "' + trimmed + '" (' + count + ' devices)');
     }
+
+    // ── Weather city picker ──────────────────────────────────────────────
+    // Queries Open-Meteo's geocoding API straight from the browser (it sends
+    // access-control-allow-origin: *), so the panel never proxies it — that
+    // keeps the request off the ESP32's network task, which runs under a 5 s
+    // watchdog.
+    //
+    // Picking a result pins its coordinates; typing by hand clears them, which
+    // tells the firmware to geocode the name at boot the way it always did.
+    // Without that, editing the city after a pick would leave the panel
+    // fetching weather for the previous place.
+    let cityPickTimer = null;
+
+    function setCityCoords(lat, lon) {
+        document.getElementById('weather_lat').value = (lat || lon) ? lat : '';
+        document.getElementById('weather_lon').value = (lat || lon) ? lon : '';
+        renderCityPin();
+    }
+
+    // Coordinates are shown, not hidden, so their state is never a surprise —
+    // which is why typing a city name no longer wipes them. Out-of-range values
+    // are called out here rather than silently zeroed by the firmware.
+    function renderCityPin() {
+        const pin = document.getElementById('city-pinned');
+        const lat = parseFloat(document.getElementById('weather_lat').value);
+        const lon = parseFloat(document.getElementById('weather_lon').value);
+        if (isNaN(lat) && isNaN(lon)) {
+            pin.textContent = 'no coordinates — the panel will look the city up by name';
+            pin.className = 'text-[10px] text-slate-500';
+            return;
+        }
+        const bad = isNaN(lat) || isNaN(lon) ||
+                    lat < -90 || lat > 90 || lon < -180 || lon > 180;
+        if (bad) {
+            pin.textContent = 'latitude must be -90..90 and longitude -180..180';
+            pin.className = 'text-[10px] text-red-400';
+        } else {
+            pin.textContent = `pinned to ${lat.toFixed(4)}, ${lon.toFixed(4)} — the city name is just a label`;
+            pin.className = 'text-[10px] text-emerald-400';
+        }
+    }
+
+    function onCoordInput() { renderCityPin(); }
+
+    function clearCityCoords() {
+        setCityCoords(0, 0);
+    }
+
+    function hideCityResults() {
+        document.getElementById('city-results').classList.add('hidden');
+    }
+
+    function onCityInput() {
+        // Deliberately does not clear the coordinates: they are visible now, so
+        // a name that disagrees with a pinned location is on screen rather than
+        // hidden. "Look up by name instead" clears them explicitly.
+        clearTimeout(cityPickTimer);
+        const q = document.getElementById('weather_city').value.trim();
+        if (q.length < 2) { hideCityResults(); return; }
+        cityPickTimer = setTimeout(() => searchCity(q), 300);
+    }
+
+    async function searchCity(q) {
+        const box = document.getElementById('city-results');
+        try {
+            const r = await fetch(
+                'https://geocoding-api.open-meteo.com/v1/search?count=5&format=json&name=' +
+                encodeURIComponent(q));
+            if (!r.ok) { hideCityResults(); return; }
+            const results = (await r.json()).results || [];
+            if (!results.length) { hideCityResults(); return; }
+
+            box.innerHTML = results.map((c, i) => {
+                // Region and country disambiguate same-named places, which is
+                // the whole point of picking from a list.
+                const where = [c.admin1, c.country].filter(Boolean).join(', ');
+                return `<button type="button" data-i="${i}"
+                    class="w-full text-left px-4 py-2 hover:bg-slate-700/60 transition-colors border-b border-slate-700/40 last:border-0">
+                    <span class="text-sm text-slate-100">${escHtml(c.name)}</span>
+                    <span class="text-xs text-slate-500 ml-2">${escHtml(where)}</span>
+                </button>`;
+            }).join('');
+
+            box.querySelectorAll('button').forEach(btn => {
+                btn.onclick = () => {
+                    const c = results[+btn.dataset.i];
+                    document.getElementById('weather_city').value = c.name;
+                    setCityCoords(c.latitude, c.longitude);
+                    hideCityResults();
+                };
+            });
+            box.classList.remove('hidden');
+        } catch (e) {
+            hideCityResults(); // offline browser: the field still works as text
+        }
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#city-field')) hideCityResults();
+    });
 
     let ROOMS = [];
 
@@ -1336,6 +1449,8 @@ const char index_html[] PROGMEM = R"rawliteral(
             mqtt_usr: document.getElementById('mqtt_usr').value,
             mqtt_pwd: document.getElementById('mqtt_pwd').value,
             weather_city: document.getElementById('weather_city').value,
+            weather_lat: parseFloat(document.getElementById('weather_lat').value) || 0,
+            weather_lon: parseFloat(document.getElementById('weather_lon').value) || 0,
             panel_title: document.getElementById('panel_title').value,
             theme_dark: document.getElementById('theme_dark').value === 'true',
             large_tiles: document.getElementById('large_tiles').value === 'true',
@@ -1356,39 +1471,51 @@ const char index_html[] PROGMEM = R"rawliteral(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         }).then(res => {
-            if(res.ok) {
-                showToast("Configuration saved! Rebooting panel...");
-                let sec = 0;
-                btn.innerHTML = '<svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Rebooting...';
-                const tick = setInterval(() => {
-                    sec++;
-                    btn.innerHTML = '<svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Rebooting... ' + sec + 's';
-                    if (sec >= 5) {
-                        fetch('/api/config', {cache:'no-store'}).then(r => {
-                            if (r.ok) { clearInterval(tick); window.location.reload(); }
-                        }).catch(() => {});
-                    }
-                    if (sec >= 60) {
-                        clearInterval(tick);
-                        btn.innerHTML = orgHtml;
-                        btn.classList.remove('opacity-80', 'cursor-not-allowed', 'pointer-events-none');
-                        showToast('Reboot is taking longer than expected. Please refresh this page manually.', true);
-                    }
-                }, 1000);
+            if (res.ok) {
+                waitForPanel("Configuration saved! Rebooting panel...");
             } else if (res.status === 507) {
-                showToast("Error: Device Memory Full. Delete some devices.", true);
-                btn.innerHTML = orgHtml;
-                btn.classList.remove('opacity-80', 'cursor-not-allowed', 'pointer-events-none');
+                saveFailed("Error: Device Memory Full. Delete some devices.");
             } else {
-                showToast("Error saving configuration.", true);
-                btn.innerHTML = orgHtml;
-                btn.classList.remove('opacity-80', 'cursor-not-allowed', 'pointer-events-none');
+                saveFailed("Error saving configuration.");
             }
-        }).catch(err => {
-            showToast("Network Error saving configuration.", true);
+        }).catch(() => {
+            // The panel answers, waits 300 ms, then reboots — and
+            // ESPAsyncWebServer writes the response from another task, so the
+            // socket is often cut before the browser has read it. A dropped
+            // POST is therefore indistinguishable from a successful one at this
+            // level, and calling it an error was wrong more often than right:
+            // the settings had usually been written before the reset. Wait and
+            // see whether the panel comes back instead of guessing.
+            waitForPanel("Panel stopped responding — it usually means it saved and rebooted. Checking...");
+        });
+
+        function saveFailed(msg) {
+            showToast(msg, true);
             btn.innerHTML = orgHtml;
             btn.classList.remove('opacity-80', 'cursor-not-allowed', 'pointer-events-none');
-        });
+        }
+
+        // Polls until the panel serves /api/config again, then reloads so the
+        // form shows what was actually stored rather than what was typed.
+        function waitForPanel(msg) {
+            showToast(msg);
+            const spin = '<svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+            let sec = 0;
+            btn.innerHTML = spin + ' Rebooting...';
+            const tick = setInterval(() => {
+                sec++;
+                btn.innerHTML = spin + ' Rebooting... ' + sec + 's';
+                if (sec >= 5) {
+                    fetch('/api/config', { cache: 'no-store' }).then(r => {
+                        if (r.ok) { clearInterval(tick); window.location.reload(); }
+                    }).catch(() => {});
+                }
+                if (sec >= 60) {
+                    clearInterval(tick);
+                    saveFailed('Panel has not come back. Check its power and Wi-Fi, then refresh this page to see what was saved.');
+                }
+            }, 1000);
+        }
     }
     function updateTimeoutDisplay(val) {
         const secs = parseInt(val);

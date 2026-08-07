@@ -394,7 +394,7 @@ populate:
                           (void *)(ptrdiff_t)i);
     }
     lv_obj_t *chip_lbl = lv_label_create(chip);
-    lv_label_set_text(chip_lbl, devices[i].room[0] ? devices[i].room : "—");
+    lv_label_set_text(chip_lbl, devices[i].room[0] ? devices[i].room : "--");
     lv_obj_set_style_text_font(chip_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(chip_lbl, lv_color_hex(CLR_HEX_TEXT_MID), 0);
     lv_label_set_long_mode(chip_lbl, LV_LABEL_LONG_DOT);

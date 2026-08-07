@@ -135,6 +135,12 @@ enum LangKey : uint8_t {
   L_AVG_HUM,
   L_OUTDOOR,
   L_NO_SENSORS,
+  L_AIR_QUALITY,
+  L_AQI_GOOD,
+  L_AQI_MODERATE,
+  L_AQI_SENSITIVE,
+  L_AQI_UNHEALTHY,
+  L_AQI_HAZARDOUS,
 
   // --- Screensaver ---
   L_SMART_HOME,
