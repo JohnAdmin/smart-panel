@@ -18,6 +18,7 @@
 enum UiNavDest {
   UI_NAV_HOME = 0,
   UI_NAV_SCENES, // scenes + schedule, as two tabs
+  UI_NAV_SENSORS,
   UI_NAV_SETTINGS,
   UI_NAV_COUNT
 };

@@ -78,6 +78,7 @@ void ui_refresh_home_climate();
 #define UI_VIEW_FAVORITES (-2)
 #define UI_VIEW_SCENES    (-3)
 #define UI_VIEW_SCHEDULE  (-4)
+#define UI_VIEW_SENSORS   (-5)
 
 // Dashboard visibility — the panel's own status entry is not a controllable
 // device, so it is excluded from tiles, room tabs and every ON/total count.

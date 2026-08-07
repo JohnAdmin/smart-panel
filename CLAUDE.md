@@ -121,8 +121,8 @@ cross-screen surface.
 
 `src/ui/ui_nav_rail.cpp` owns the left 52 px of any screen that calls
 `ui_nav_rail_create()` — it is the top-level navigation (Home · Scenes ·
-Settings, plus a screensaver button). Scenes and schedules share one
-destination with a pill tab row; the fourth slot is reserved for Sensors.
+Sensors · Settings, plus a screensaver button). Scenes and schedules share one
+destination with a pill tab row.
 **Content on those screens is
 laid out against `UI_CONTENT_W` / `UI_CONTENT_H`, not `SCREEN_WIDTH`.** Every
 tile width in `ui_helpers.h` is sized so its column count survives that 428 px
@@ -131,8 +131,8 @@ Full-screen overlays (screensaver, dimmer modal) still use `SCREEN_WIDTH` —
 they are meant to cover the rail.
 
 `ui_ScreenMain` hosts **views**, not one fixed dashboard. Home (room cards),
-a room's device tiles, favourites, the scene run-grid and the schedule list all
-render into
+a room's device tiles, favourites, the scene run-grid, the schedule list and
+the sensors table all render into
 `main_body_container`; `ui_show_main_view()` sets `s_view` and re-renders
 through `rebuild_grid()`. Because every caller of `rebuild_grid()` (language
 change, device edit, settings save) re-renders the *current* view, new views
