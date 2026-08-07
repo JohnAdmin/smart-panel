@@ -3,6 +3,7 @@
 #include "../hal.h"
 #include "../lang.h"
 #include "../mqtt_manager.h"
+#include "ui_nav_rail.h" // ui_nav_rail_set_active() on every view switch
 #include "../wifi_manager.h"
 #include "ui_dimmer_modal.h"
 #include "ui_helpers.h"
@@ -497,6 +498,13 @@ int ui_current_main_view() { return s_view; }
 
 void ui_show_main_view(int view) {
   s_view = view;
+  // Several views share one rail destination: a room and the favourites list
+  // are both reached from Home, and the schedule is the Scenes tab's second
+  // page. The rail is built once and stays put, so it has to be told.
+  ui_nav_rail_set_active(view == VIEW_SENSORS  ? UI_NAV_SENSORS
+                         : (view == VIEW_SCENES || view == VIEW_SCHEDULE)
+                             ? UI_NAV_SCENES
+                             : UI_NAV_HOME);
   rebuild_grid();
 }
 
