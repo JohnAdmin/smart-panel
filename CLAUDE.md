@@ -59,9 +59,18 @@ flash leaves the old copies in place.
 For OTA instead of USB, `platformio.ini` carries a commented `espota` block —
 switch `upload_port` to the panel IP and `upload_protocol = espota`.
 
-`extra_scripts = post:fix_esptool.py` is load-bearing: it rewrites the uploader
-to `python -m esptool` because Windows Defender quarantines `esptool.exe` out of
-the PlatformIO venv. It must stay a *post* script.
+Both `extra_scripts` are load-bearing, and both must stay *post* scripts:
+
+- `fix_esptool.py` rewrites the uploader to `python -m esptool`, because Windows
+  Defender quarantines `esptool.exe` out of the PlatformIO venv.
+- `fix_otadata_offset.py` moves `boot_app0.bin` from the 0xE000 the Arduino
+  builder hard-codes to the otadata offset `partitions_custom.csv` actually
+  declares. 0xE000 sits inside this project's NVS partition, so without it every
+  `upload` erased 8 KB of saved settings — silently, and only the most recently
+  written keys. It patches `UPLOADERFLAGS` as well as `FLASH_EXTRA_IMAGES`;
+  patching only the latter makes `envdump` look right while `upload` still
+  erases NVS. **If the partition table moves, nothing here needs changing** —
+  the offset is read from the CSV.
 
 `regen_fonts.ps1` regenerates the `lv_font_montserrat_*.c` files via
 `lv_font_conv`, merging Montserrat + Sarabun (Thai, `0x0E00-0x0E7F`) + a
