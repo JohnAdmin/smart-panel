@@ -1164,7 +1164,9 @@ static void sensor_room_row(lv_obj_t *parent, int room_idx, bool last) {
     lv_label_set_text(on_lbl, b);
     lv_obj_set_style_text_color(on_lbl, lv_color_hex(CLR_HEX_ACCENT_HI), 0);
   } else {
-    lv_label_set_text(on_lbl, "\xE2\x80\x94"); // em dash
+    // "--", not an em dash: the merged font covers 0x20-0x7F, 0xA0-0xFF,
+    // 0x2022 and 0x2026 only, so U+2014 rendered as LVGL's missing-glyph box.
+    lv_label_set_text(on_lbl, "--");
     lv_obj_set_style_text_color(on_lbl, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
   }
   lv_obj_set_style_text_font(on_lbl, &lv_font_montserrat_12, 0);
@@ -1190,9 +1192,9 @@ static void sensor_room_row(lv_obj_t *parent, int room_idx, bool last) {
     lv_label_set_text_fmt(h, "%d%%", rm.hum);
     lv_obj_set_style_text_color(h, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
   } else {
-    lv_label_set_text(t, "\xE2\x80\x94");
+    lv_label_set_text(t, "--");
     lv_obj_set_style_text_color(t, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
-    lv_label_set_text(h, "\xE2\x80\x94");
+    lv_label_set_text(h, "--");
     lv_obj_set_style_text_color(h, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
   }
 }

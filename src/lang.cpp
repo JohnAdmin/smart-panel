@@ -126,7 +126,8 @@ static const char *defaults[LANG_KEY_COUNT] = {
   [L_SCENE_NAME_HINT] = "e.g. Good Morning",
   [L_SCENE_ICON]    = "Icon",
   [L_SCENE_ICONS]   = "Morning\nNight\nLeave\nMovie\nParty\nCustom",
-  [L_SCENE_ACTIONS] = "Actions (MQTT Topic \xe2\x86\x92 Payload)",
+  // "->" not U+2192: the merged font has no arrow, so it drew as a box.
+  [L_SCENE_ACTIONS] = "Actions (MQTT Topic -> Payload)",
   [L_TOPIC]         = "Topic",
   [L_PAYLOAD]       = "Payload",
   [L_ACTION]        = "Action",

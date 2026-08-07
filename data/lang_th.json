@@ -72,7 +72,7 @@
   "scene_name_hint": "เช่น สวัสดีตอนเช้า",
   "scene_icon": "ไอคอน",
   "scene_icons": "เช้า\nกลางคืน\nออกจากบ้าน\nดูหนัง\nปาร์ตี้\nกำหนดเอง",
-  "scene_actions": "คำสั่ง (MQTT Topic → Payload)",
+  "scene_actions": "คำสั่ง (MQTT Topic -> Payload)",
   "topic": "Topic",
   "payload": "Payload",
   "action": "คำสั่ง",
