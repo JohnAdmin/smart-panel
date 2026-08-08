@@ -58,6 +58,25 @@ static int ss_pixel_shift_x = 0;
 static int ss_pixel_shift_y = 0;
 static unsigned long ss_last_shift_ms = 0;
 static lv_obj_t *ss_content_wrap = NULL; // wrapper for pixel-shift anti burn-in
+
+// snprintf truncates by bytes, so an overflow can stop halfway through a UTF-8
+// sequence and the leftover bytes render as a missing-glyph box rather than as
+// nothing. The buffers below are sized not to overflow, but a translation is
+// runtime data from LittleFS and can grow past whatever we sized for — this
+// makes that show up as a shorter string instead of a box.
+static void trim_partial_utf8(char *s) {
+  size_t len = strlen(s);
+  if (!len) return;
+  size_t i = len - 1;
+  while (i > 0 && ((uint8_t)s[i] & 0xC0) == 0x80) i--; // back over continuations
+  uint8_t lead = (uint8_t)s[i];
+  size_t need = lead < 0x80             ? 1
+                : (lead & 0xE0) == 0xC0 ? 2
+                : (lead & 0xF0) == 0xE0 ? 3
+                : (lead & 0xF8) == 0xF0 ? 4
+                                        : 1;
+  if (i + need > len) s[i] = '\0';
+}
 static lv_obj_t *ss_stock_lbl[STOCK_MAX_SYMBOLS] = {NULL, NULL, NULL};
 
 // Colon pulse animation callback
@@ -454,7 +473,14 @@ void update_screensaver() {
   // --- Format weather string ---
   // "28°  Partly Cloudy  ·  Bangkok" — a middle dot separates the place from
   // the reading more cleanly than a hyphen at this size.
-  char wBuf[64] = "";
+  // UTF-8 makes this far longer than it reads. The condition comes from a
+  // runtime translation — Thai's "มีเมฆบางส่วน" alone is 36 bytes — and a Thai
+  // city name fills weatherCityName to its last byte, so "27°  <condition>  ·
+  // <city>" reaches 75 bytes where the English it was sized against reached 30.
+  // At 64 the city was cut off the end, mid-sequence, and the remnant rendered
+  // as a missing-glyph box. Sized for both runtime strings at full width plus
+  // the separators, with room for a longer translation than any shipping today.
+  char wBuf[160] = "";
   if (weatherValid) {
     if (weatherCityName[0])
       snprintf(wBuf, sizeof(wBuf), "%.0f\xC2\xB0""  %s  \xC2\xB7  %s",
@@ -462,6 +488,7 @@ void update_screensaver() {
     else
       snprintf(wBuf, sizeof(wBuf), "%.0f\xC2\xB0""  %s",
                weatherTemp, wmoToDesc(weatherCode));
+    trim_partial_utf8(wBuf);
   }
 
   // --- Connectivity: coloured glyphs + how much of the house is on ---
