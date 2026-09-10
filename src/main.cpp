@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include "lang.h"
+#include "mem_probe.h"
 #include "mqtt_manager.h"
 #include "scene.h"
 #include "schedule.h"
@@ -119,6 +120,37 @@ void safe_wdt_reset() {
   if (esp_task_wdt_status(NULL) == ESP_OK) {
     esp_task_wdt_reset();
   }
+}
+
+// Memory instrumentation for the panel-stuck investigation. Prints, for the
+// CALLING task:
+//   heap     — total free heap now (matches the boot "free heap=" figure)
+//   min      — lowest free heap since boot (esp_get_minimum_free_heap_size);
+//              a monotonic decline across identical load = a real leak
+//   largest  — biggest contiguous internal 8-bit block; shrinking while `heap`
+//              holds steady = fragmentation (TLS/socket allocs fail on this)
+//   psram    — free SPIRAM (LVGL buffers live here)
+//   stackHW  — bytes of head-room ever left on THIS task's stack; call from
+//              network_task (network_loop / reconnect_mqtt) to watch the
+//              8 KB network stack under HTTP+TLS+JSON load
+void log_mem(const char *tag) {
+  // `internal` is the number that actually matters — WiFi / LWIP / mbedTLS /
+  // sockets allocate from internal 8-bit DRAM, not PSRAM. `heap` and `min` are
+  // whole-pool (internal + PSRAM) so they look huge; watch `internal`,
+  // `intMin` and `largest` for a leak or fragmentation.
+  Serial.printf(
+      "[MEM %s] internal=%u intMin=%u largest=%u heap=%u min=%u psram=%u "
+      "stackHW=%u\n",
+      tag,
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+      (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL |
+                                                MALLOC_CAP_8BIT),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL |
+                                                 MALLOC_CAP_8BIT),
+      (unsigned)esp_get_free_heap_size(),
+      (unsigned)esp_get_minimum_free_heap_size(),
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+      (unsigned)uxTaskGetStackHighWaterMark(NULL));
 }
 
 volatile bool otaActive = false;
@@ -349,6 +381,8 @@ void setup() {
       1,
       NULL,
       0); // Core 0
+
+  mem_probe_start(); // no-op unless build defines MEM_PROBE=1
 }
 
 /* =========================

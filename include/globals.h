@@ -101,6 +101,10 @@ extern Preferences preferences;
 // --- Safe Watchdog Wrapper ---
 void safe_wdt_reset();
 
+// --- Memory instrumentation (panel-stuck investigation) ---
+// Prints heap / min-heap / largest-block / PSRAM / calling-task stack head-room.
+void log_mem(const char *tag);
+
 // --- OTA progress (written by the /api/update upload handler on Core 0) ---
 extern volatile bool otaActive;
 extern volatile int  otaProgressPct;

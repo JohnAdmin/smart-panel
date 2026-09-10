@@ -34,7 +34,7 @@
 #define MAX_DEVICES 100
 #define DEFAULT_WIFI_SSID "Your_SSID"
 #define DEFAULT_WIFI_PASS "Your_PASSWORD"
-#define DEFAULT_MQTT_SERVER "192.168.1.140"
+#define DEFAULT_MQTT_SERVER "192.168.88.100"
 #define DEFAULT_MQTT_PORT 1883
 #define DEFAULT_MQTT_USER ""
 #define DEFAULT_MQTT_PASS ""
@@ -66,7 +66,11 @@
                                       // a tile admits the command is unconfirmed
 #define STALE_DEVICE_MS       300000  // 5 min — mark device stale if no MQTT
 #define MQTT_BACKOFF_INIT_MS  5000    // Initial MQTT reconnect delay
-#define MQTT_BACKOFF_MAX_MS   60000   // Maximum MQTT reconnect delay
+#define MQTT_BACKOFF_MAX_MS   30000   // Max MQTT reconnect delay — also the
+                                      // worst-case lag before the panel notices
+                                      // the broker/route is reachable again
+                                      // when WiFi never dropped (a WiFi
+                                      // re-associate resets the backoff to INIT)
 #define DEVICE_STATE_SAVE_MS  10000   // Debounced save interval for dirty states
 #define MQTT_HEARTBEAT_MS     30000   // Periodic heartbeat log interval
 // HTTP client timeout for the weather, air-quality and stock fetches. Must
