@@ -308,13 +308,20 @@ void mqtt_callback(MQTTClient *client, char topic[], char bytes[], int length) {
 }
 
 void reconnect_mqtt() {
+  log_mem("reconnect-enter"); // panel-stuck investigation: watch delta per attempt
   if (!mqttClient.connected()) {
     String clientId = "ESP32Panel-" + WiFi.macAddress();
     // Set LWT and persistent session before connect
     mqttClient.setWill(PANEL_STATUS_TOPIC, "offline", true, 1);
     mqttClient.setCleanSession(false); // broker queues QoS 1 messages while we're offline
-    if (mqttClient.connect(clientId.c_str(), mqtt_username.c_str(),
-                           mqtt_password.c_str())) {
+    // connect() blocks on a TCP handshake to the broker. An unreachable or
+    // wrong broker IP stalls it long enough to overrun the 5 s network-task
+    // watchdog and panic-reboot the panel, so feed the watchdog either side.
+    safe_wdt_reset();
+    bool ok = mqttClient.connect(clientId.c_str(), mqtt_username.c_str(),
+                                 mqtt_password.c_str());
+    safe_wdt_reset();
+    if (ok) {
       Serial.println("[MQTT] Connected to broker (persistent session)!");
       isMqttConnected = true;
       mqttClient.publish(PANEL_STATUS_TOPIC, "online", true, 1);
@@ -325,6 +332,7 @@ void reconnect_mqtt() {
       }
       
       for (int i = 0; i < deviceCount; i++) {
+        safe_wdt_reset(); // O(deviceCount) blocking subscribes — stay under the WDT
         Serial.printf("[MQTT-SUB] Device %d '%s':\n", i, devices[i].name);
         if (strlen(devices[i].state_topic) > 0) {
           bool ok = mqttClient.subscribe(devices[i].state_topic, 1); // QoS 1
@@ -372,6 +380,7 @@ void reconnect_mqtt() {
       // --- HA MQTT Auto-Discovery ---
       // Publish config for each device so Home Assistant auto-detects them
       for (int i = 0; i < deviceCount; i++) {
+        safe_wdt_reset(); // O(deviceCount) blocking publishes — stay under the WDT
         if (strlen(devices[i].cmnd_topic) == 0) continue;
         // Build a unique object_id from device name (replace spaces with _)
         char obj_id[64];
@@ -418,6 +427,7 @@ void reconnect_mqtt() {
       }
     }
   }
+  log_mem("reconnect-exit");
 }
 
 void mqtt_manager_setup() {
@@ -430,6 +440,26 @@ void mqtt_manager_setup() {
 }
 
 void mqtt_manager_loop() {
+  // Reconnect backoff state. Kept at function scope so the WiFi-reassociation
+  // edge below can zero it: otherwise a long outage pins mqttBackoff at its
+  // ceiling and, once the network path comes back, the panel can sit up to
+  // that long before the next attempt — which is why a manual reboot used to
+  // reconnect faster than just waiting.
+  static unsigned long lastMqttReconnectAttempt = 0;
+  static unsigned long mqttBackoff = MQTT_BACKOFF_INIT_MS;
+  static bool prevWifiConnected = false;
+  if (isWifiConnected && !prevWifiConnected) {
+    // WiFi just (re)associated — a new DHCP lease and routes. The old MQTT
+    // socket is dead but the client may not know yet, so tear it down
+    // explicitly, then retry immediately instead of honouring a stale backoff
+    // from the last outage.
+    mqttClient.disconnect();
+    isMqttConnected = false;
+    mqttBackoff = MQTT_BACKOFF_INIT_MS;
+    lastMqttReconnectAttempt = 0;
+  }
+  prevWifiConnected = isWifiConnected;
+
   if (isWifiConnected) {
     if (!mqttClient.connected()) {
       isMqttConnected = false;
@@ -437,8 +467,6 @@ void mqtt_manager_loop() {
         ui_update_header();
         xSemaphoreGive(lvgl_mux);
       }
-      static unsigned long lastMqttReconnectAttempt = 0;
-      static unsigned long mqttBackoff = MQTT_BACKOFF_INIT_MS;
       if (millis() - lastMqttReconnectAttempt > mqttBackoff) {
         lastMqttReconnectAttempt = millis();
         reconnect_mqtt();
@@ -610,6 +638,7 @@ void network_request_all_states() {
   // avoiding a gap where Homebridge/Apple Home commands can be missed.
   Serial.println("[MQTT] Syncing — re-subscribing state topics and refreshing command subscriptions...");
   for (int i = 0; i < deviceCount; i++) {
+    safe_wdt_reset(); // O(deviceCount) blocking unsub/sub — stay under the WDT
     if (strlen(devices[i].state_topic) > 0) {
       // Unsubscribe then re-subscribe to force broker to re-deliver retained messages
       mqttClient.unsubscribe(devices[i].state_topic);

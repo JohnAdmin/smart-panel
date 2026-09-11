@@ -8,6 +8,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include <esp_task_wdt.h>
 
 // --- WMO weather code to human-readable description ---
 // Looked up on every call so the text follows the active language, grouped the
@@ -33,6 +34,16 @@ static char cached_city[32] = "";
 void fetchWeather() {
   if (!isWifiConnected)
     return;
+
+  // DNS resolution for the calls below isn't reliably bounded by
+  // HTTPClient::setTimeout() on this core — a slow or dead DNS server can
+  // block this whole function well past HTTP_TIMEOUT_MS, overrunning the
+  // network task's 5 s watchdog and panic-rebooting the panel (taking any
+  // live MQTT connection down with it). Weather/AQI are cosmetic, so
+  // unsubscribe network_task from the watchdog for the duration instead of
+  // letting a bad DNS answer crash the panel. Single exit point below
+  // re-subscribes; safe_wdt_reset() calls in between become no-ops.
+  esp_task_wdt_delete(NULL);
 
   HTTPClient http;
   float lat = DEFAULT_LATITUDE;
@@ -162,4 +173,6 @@ void fetchWeather() {
     airQualityValid = false;
   }
   http.end();
+
+  esp_task_wdt_add(NULL);
 }

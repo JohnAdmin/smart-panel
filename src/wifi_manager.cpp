@@ -338,6 +338,10 @@ void network_setup() {
   if (canTrySta) {
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
+    // Modem power-save makes the STA miss beacons and get aged out by the AP,
+    // which shows up as a WiFi re-associate + fresh DHCP every so often and
+    // kills the MQTT socket each time. The panel runs on mains, so disable it.
+    WiFi.setSleep(false);
     WiFi.setHostname("SC01-Plus-Panel");
     WiFi.disconnect(false, false);
     delay(100);
@@ -360,6 +364,7 @@ void network_setup() {
     delay(200);
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
+    WiFi.setSleep(false);
     WiFi.setHostname("SC01-Plus-Panel");
     WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
 
@@ -379,6 +384,16 @@ void network_setup() {
 
   if (WiFi.status() == WL_CONNECTED) {
     isWifiConnected = true;
+    // The panel never logged its own L3 config, which made "associated but no
+    // route off-subnet" indistinguishable from a broker/firewall problem from
+    // the serial console alone. Print it once here.
+    Serial.printf("[NET] IP=%s  GW=%s  mask=%s  DNS=%s  RSSI=%d  BSSID=%s\n",
+                  WiFi.localIP().toString().c_str(),
+                  WiFi.gatewayIP().toString().c_str(),
+                  WiFi.subnetMask().toString().c_str(),
+                  WiFi.dnsIP().toString().c_str(),
+                  (int)WiFi.RSSI(),
+                  WiFi.BSSIDstr().c_str());
     sntp_set_time_sync_notification_cb(timeSyncCallback);
     configTime((long)gmtOffsetHours * 3600L, DAYLIGHT_OFFSET_SEC, NTP_SERVER,
                "time.nist.gov", "time.google.com");
@@ -416,6 +431,13 @@ void network_setup() {
 //  network_loop
 // --------------------------------------------------------
 void network_loop() {
+  // Periodic memory trace for the panel-stuck investigation (network_task).
+  static unsigned long lastMemLog = 0;
+  if (millis() - lastMemLog > 15000) {
+    lastMemLog = millis();
+    log_mem("periodic");
+  }
+
   if (isConfigMode) {
     dnsServer.processNextRequest();
 
@@ -426,6 +448,7 @@ void network_loop() {
       configStaConnectSince = 0;
       WiFi.mode(WIFI_STA);
       WiFi.setAutoReconnect(true);
+      WiFi.setSleep(false);
 
       isWifiConnected = true;
       sntp_set_time_sync_notification_cb(timeSyncCallback);
@@ -469,6 +492,7 @@ void network_loop() {
         WiFi.mode(WIFI_AP_STA);
         WiFi.softAP("SC01-Plus-Setup");
         WiFi.setAutoReconnect(true);
+        WiFi.setSleep(false);
         WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
         configStaConnectSince = millis();
       } else {
@@ -501,7 +525,9 @@ void network_loop() {
     uint32_t weatherInterval = weatherValid ? WEATHER_UPDATE_MS : 30000;
     if (millis() - lastWeatherUpdate > weatherInterval) {
       lastWeatherUpdate = millis();
+      log_mem("pre-weather");
       fetchWeather();
+      log_mem("post-weather");
     }
 
     mqtt_manager_loop();
@@ -509,7 +535,9 @@ void network_loop() {
     // Stock ticker update (every 5 minutes)
     if (stockEnabled && millis() - lastStockUpdate > STOCK_UPDATE_MS) {
       lastStockUpdate = millis();
+      log_mem("pre-stock");
       fetchStocks();
+      log_mem("post-stock");
     }
   } else {
     if (isWifiConnected) {

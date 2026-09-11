@@ -9,6 +9,7 @@
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <WiFiClient.h>
+#include <esp_task_wdt.h>
 
 // ── Definitions ─────────────────────────────────────────────────────────────
 StockData stockData[STOCK_MAX_SYMBOLS] = {};
@@ -67,6 +68,15 @@ void fetchStocks() {
     return;
   }
 
+  // DNS resolution for api.twelvedata.com isn't reliably bounded by
+  // HTTPClient::setTimeout() on this core — a slow or dead DNS server can
+  // block this call well past HTTP_TIMEOUT_MS, overrunning the network
+  // task's 5 s watchdog and panic-rebooting the panel (taking any live MQTT
+  // connection down with it). The ticker is cosmetic, so unsubscribe
+  // network_task from the watchdog for the duration instead. Every return
+  // below re-subscribes before leaving.
+  esp_task_wdt_delete(NULL);
+
   // Build comma-separated symbol list; URL-encode '/' for metals (XAU/USD)
   String symbols = stockSymbols[0];
   for (int i = 1; i < STOCK_MAX_SYMBOLS; i++) {
@@ -86,6 +96,7 @@ void fetchStocks() {
   http.setTimeout(HTTP_TIMEOUT_MS);
   if (!http.begin(client, url)) {
     Serial.println("[STOCK] http.begin failed");
+    esp_task_wdt_add(NULL);
     return;
   }
   // This runs on the network task, which is watchdog-supervised, and the GET
@@ -97,6 +108,7 @@ void fetchStocks() {
   if (code != 200) {
     Serial.printf("[STOCK] HTTP %d\n", code);
     http.end();
+    esp_task_wdt_add(NULL);
     return;
   }
   String body = http.getString();
@@ -109,6 +121,7 @@ void fetchStocks() {
   DeserializationError err = deserializeJson(doc, body);
   if (err) {
     Serial.printf("[STOCK] JSON parse error: %s\n", err.c_str());
+    esp_task_wdt_add(NULL);
     return;
   }
 
@@ -145,4 +158,6 @@ void fetchStocks() {
                   stockData[i].percent_change,
                   stockData[i].market_open ? "OPEN" : "CLOSED");
   }
+
+  esp_task_wdt_add(NULL);
 }
