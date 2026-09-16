@@ -19,8 +19,15 @@ pio run -t uploadfs          # LittleFS image from data/
 pio device monitor -b 115200 # serial log
 ```
 
-Anything under `data/` needs `uploadfs`, not `upload`. Full build notes:
-[docs/build.md](docs/build.md).
+Anything under `data/` needs `uploadfs`, not `upload` — that covers
+`wallpaper.jpg`, `devices.json`, and the translation files; a plain firmware
+flash leaves the old copies in place.
+
+Two `platformio.ini` post-build scripts are load-bearing — don't remove them
+or turn them into `pre` scripts: `fix_esptool.py` works around Windows
+Defender quarantining `esptool.exe`, and `fix_otadata_offset.py` stops
+`upload` from silently erasing 8 KB of saved settings out of the NVS
+partition on every flash. Full build notes: [CLAUDE.md](CLAUDE.md#build--flash).
 
 On first boot with no saved WiFi the panel comes up in AP mode as
 `SC01-Plus-Setup`; join it and open `http://smartpanel.local` (`admin` /
@@ -37,7 +44,7 @@ On first boot with no saved WiFi the panel comes up in AP mode as
 | [Web API & Portal](docs/web-api.md) | REST endpoint table, how to edit the SPA |
 | [Source File Map](docs/source-map.md) | Which file does what, translation workflow |
 | [Configuration & Limits](docs/configuration.md) | Max devices/scenes/schedules, shipped defaults |
-| [Build & Flash](docs/build.md) | PlatformIO commands, `uploadfs` vs `upload`, OTA, fonts |
+| [Build & Flash](CLAUDE.md#build--flash) | PlatformIO commands, `uploadfs` vs `upload`, OTA, fonts (supersedes `docs/build.md`) |
 | [Troubleshooting](docs/troubleshooting.md) | Password reset, factory reset, serial debug, known limitations |
 | [Stock Ticker](docs/stock-ticker.md) | Twelve Data setup, verification, diagnosis pointers |
 | [Changelog](docs/changelog.md) | Dated feature notes |
