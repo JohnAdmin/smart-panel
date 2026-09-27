@@ -299,6 +299,13 @@ void network_task(void *pvParameters) {
 
 void setup() {
   Serial.begin(115200);
+  // ARDUINO_USB_MODE=1 makes Serial an HWCDC (USB-Serial/JTAG). Its write()
+  // blocks up to tx_timeout_ms per call whenever the peripheral sees an
+  // enumerated host that is not draining the FIFO — which is the normal state
+  // after a cold power-on, before the monitor re-attaches. That silently
+  // stalls whichever task is printing, including the watchdog-supervised
+  // network_task. 0 = drop output instead of blocking.
+  Serial.setTxTimeoutMs(0);
   delay(100);
 
   // SURGICAL WDT DISABLE
