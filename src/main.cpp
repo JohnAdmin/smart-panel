@@ -14,6 +14,7 @@
 #include <LittleFS.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
 #include <lvgl.h>
@@ -299,6 +300,13 @@ void network_task(void *pvParameters) {
 
 void setup() {
   Serial.begin(115200);
+  // ARDUINO_USB_MODE=1 makes Serial an HWCDC (USB-Serial/JTAG). Its write()
+  // blocks up to tx_timeout_ms per call whenever the peripheral sees an
+  // enumerated host that is not draining the FIFO — which is the normal state
+  // after a cold power-on, before the monitor re-attaches. That silently
+  // stalls whichever task is printing, including the watchdog-supervised
+  // network_task. 0 = drop output instead of blocking.
+  Serial.setTxTimeoutMs(0);
   delay(100);
 
   // SURGICAL WDT DISABLE
@@ -308,6 +316,18 @@ void setup() {
   esp_log_level_set("task_wdt", ESP_LOG_NONE);
 
   Serial.println("\n--- SC01 Plus Booting [VER: FRTOS_V1] ---");
+
+  // The ROM line reads RTC_SW_CPU_RST for both a deliberate ESP.restart() and
+  // a panic/watchdog reboot, and the task_wdt log is silenced above — so this
+  // is the only place a crash shows up as a crash.
+  static const char *const RESET_NAMES[] = {
+      "UNKNOWN", "POWERON", "EXT",      "SW",       "PANIC",   "INT_WDT",
+      "TASK_WDT", "WDT",    "DEEPSLEEP", "BROWNOUT", "SDIO"};
+  esp_reset_reason_t rr = esp_reset_reason();
+  Serial.printf("[BOOT] Reset reason: %s (%d)\n",
+                (unsigned)rr < sizeof(RESET_NAMES) / sizeof(RESET_NAMES[0])
+                    ? RESET_NAMES[rr] : "?",
+                (int)rr);
 
   lvgl_mux = xSemaphoreCreateMutex();
   devices_mux = xSemaphoreCreateMutex();

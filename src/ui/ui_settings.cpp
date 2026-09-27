@@ -243,6 +243,64 @@ void btn_wifi_config_cb(lv_event_t *e) {
   }
 }
 
+// Same shape as build_wifi_setup_screen() — a stand-alone form dropped into
+// set_container so the shared header's Save button (btn_save_settings_cb)
+// picks up ta_mqtt_srv/usr/pwd instead of falling back to the stored values.
+void build_mqtt_setup_screen() {
+  if (kb) {
+    lv_obj_del(kb);
+    kb = NULL;
+  }
+  lv_obj_clean(set_container);
+
+  const int card_w = UI_SETTINGS_W - 20;
+  lv_obj_t *card = ui_create_glass_card(set_container, card_w, 244);
+  lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_set_style_pad_all(card, 12, 0);
+
+  lv_obj_t *lbl_title = lv_label_create(card);
+  lv_label_set_text_fmt(lbl_title, LV_SYMBOL_SETTINGS "  %s", L(L_MQTT_SETUP));
+  lv_obj_set_style_text_color(lbl_title, CLR_PRIMARY, 0);
+  lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_14, 0);
+  lv_obj_align(lbl_title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+  ta_mqtt_srv = ui_create_textarea(card, card_w - 24, L(L_WEB_MQTT_SERVER),
+                                   mqtt_server_ip.c_str(), ta_wifi_event_cb);
+  lv_obj_align(ta_mqtt_srv, LV_ALIGN_TOP_MID, 0, 30);
+
+  ta_mqtt_usr = ui_create_textarea(card, card_w - 24, L(L_MQTT_USERNAME),
+                                   mqtt_username.c_str(), ta_wifi_event_cb);
+  lv_obj_align(ta_mqtt_usr, LV_ALIGN_TOP_MID, 0, 82);
+
+  ta_mqtt_pwd = ui_create_textarea(card, card_w - 24, L(L_MQTT_PASSWORD),
+                                   mqtt_password.c_str(), ta_wifi_event_cb);
+  lv_obj_align(ta_mqtt_pwd, LV_ALIGN_TOP_MID, 0, 134);
+  lv_textarea_set_password_mode(ta_mqtt_pwd, false);
+
+  lv_obj_t *hint = lv_label_create(card);
+  lv_label_set_text(hint, L(L_WEB_SAVE_RESTART));
+  lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(hint, lv_color_hex(CLR_HEX_TEXT_LOW), 0);
+  lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+  // Hidden placeholders — only this form's fields should reach Save.
+  ta_ssid = NULL;
+  ta_pass = NULL;
+  ta_city = NULL;
+
+  kb = lv_keyboard_create(lv_obj_get_screen(set_container));
+  ui_style_keyboard(kb);
+  lv_obj_set_size(kb, SCREEN_WIDTH, 136);
+  lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+}
+
+void btn_mqtt_config_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+    build_mqtt_setup_screen();
+  }
+}
+
 // ── Content building blocks ─────────────────────────────
 // The content area is 312 px wide now that the rail and the tab sidebar have
 // taken their columns, so settings are a scrolling column of rows rather than
@@ -884,6 +942,7 @@ static void build_tab_system(lv_obj_t *page) {
   }
 
   settings_link_row(page, LV_SYMBOL_WIFI, L(L_WIFI_SETUP), btn_wifi_config_cb);
+  settings_link_row(page, LV_SYMBOL_SETTINGS, L(L_MQTT_SETUP), btn_mqtt_config_cb);
 
   // Reset web auth back to admin/admin
   danger_row(page, LV_SYMBOL_WARNING, L(L_RESET_PASS), [](lv_event_t *e) {

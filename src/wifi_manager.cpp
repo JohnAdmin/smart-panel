@@ -97,6 +97,18 @@ static unsigned long configStaConnectSince = 0;
 static const unsigned long CONFIG_MODE_STA_CONNECT_COOLDOWN_MS = 25000;
 static volatile int lastWifiDisconnectReason = 0;
 
+// Associating to the wrong AP on a shared SSID is invisible to every reconnect
+// path above: status stays WL_CONNECTED, RSSI is healthy and DHCP hands out an
+// address — just on a subnet the broker does not live on. Nothing below the
+// application layer can tell, so a persistently dead MQTT is the only signal
+// available, and the recovery is to drop the association and rescan. The
+// cooldown is what keeps a genuinely down broker (a Home Assistant restart,
+// say) from cycling WiFi every few minutes for no reason.
+static const unsigned long MQTT_DEAD_REASSOC_AFTER_MS = 180000;
+static const unsigned long MQTT_DEAD_REASSOC_COOLDOWN_MS = 300000;
+static unsigned long lastMqttOkMs = 0;
+static unsigned long lastForcedReassoc = 0;
+
 static bool hasConfiguredWifiCredentials() {
   String ssid = wifi_ssid;
   String pass = wifi_pass;
@@ -510,6 +522,9 @@ void network_loop() {
     wifiRssi = WiFi.RSSI(); // Update signal strength
     if (!isWifiConnected) {
       isWifiConnected = true;
+      // Time spent with the link down is not MQTT's fault — restart its clock
+      // so the reassociation check below only measures a healthy link.
+      lastMqttOkMs = millis();
       ui_update_header();
       fetchWeather();
       lastWeatherUpdate = millis();
@@ -531,6 +546,27 @@ void network_loop() {
     }
 
     mqtt_manager_loop();
+
+    if (isMqttConnected) {
+      lastMqttOkMs = millis();
+    } else if (millis() - lastMqttOkMs > MQTT_DEAD_REASSOC_AFTER_MS &&
+               millis() - lastForcedReassoc > MQTT_DEAD_REASSOC_COOLDOWN_MS) {
+      lastForcedReassoc = millis();
+      lastMqttOkMs = millis();
+      // Restart the 15 s WiFi.reconnect() timer below as well, or it fires
+      // into the association being started here and disrupts it.
+      lastWifiRetry = millis();
+      Serial.printf("[NET] MQTT down %lus on a healthy link (IP=%s BSSID=%s) "
+                    "— dropping association to rescan\n",
+                    MQTT_DEAD_REASSOC_AFTER_MS / 1000,
+                    WiFi.localIP().toString().c_str(),
+                    WiFi.BSSIDstr().c_str());
+      // begin() without a BSSID rescans and takes the strongest responder,
+      // which is the only way back to a different AP on the same SSID.
+      WiFi.disconnect(false, false);
+      delay(150);
+      WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+    }
 
     // Stock ticker update (every 5 minutes)
     if (stockEnabled && millis() - lastStockUpdate > STOCK_UPDATE_MS) {
