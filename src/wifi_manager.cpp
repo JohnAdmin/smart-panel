@@ -57,10 +57,19 @@ int  airQualityAqi = 0;
 bool airQualityValid = false;
 float weatherLat = 0.0f;
 float weatherLon = 0.0f;
+float weatherFeels = 0;
+int weatherHumidity = 0;
+float weatherWind = 0;
+WeatherDay weatherForecast[WEATHER_FORECAST_DAYS] = {};
+int weatherForecastDays = 0;
+WeatherHour weatherHourly[WEATHER_HOURLY_SLOTS] = {};
+int weatherHourlyCount = 0;
+char weatherUpdatedAt[6] = "";
+volatile uint32_t weatherGeneration = 0;
 
 unsigned long lastTouchTime = 0;
 bool screensaverActive = false;
-int screensaverStyle = 0; // 0=Flip Clock, 1=Minimal, 2=Screen Off
+int screensaverStyle = 0; // 0=Flip Clock, 1=Minimal, 2=Screen Off, 3=Weather
 unsigned long screensaverTimeoutMs = 120000; // default 2 minutes
 volatile bool webActivityDetected = false;
 
@@ -245,6 +254,7 @@ void loadSettings() {
     Serial.println("[SETTINGS] Brightness was too low, clamped to 120");
   }
   screensaverStyle = preferences.getInt("ss_style", 0);
+  if (screensaverStyle < 0 || screensaverStyle > 3) screensaverStyle = 0;
   screensaverTimeoutMs =
       (unsigned long)preferences.getULong("ss_timeout", 120000);
   gmtOffsetHours = preferences.getInt("gmt_offset", 7);

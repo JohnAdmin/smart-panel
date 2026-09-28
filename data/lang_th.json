@@ -174,5 +174,20 @@
   "wx_snow": "หิมะ",
   "wx_showers": "ฝนซู่",
   "wx_thunder": "ฝนฟ้าคะนอง",
-  "wx_storm": "พายุ"
+  "wx_storm": "พายุ",
+  "ss_weather": "อากาศ",
+  "today": "วันนี้",
+  "wx_feels": "รู้สึก",
+  "wx_hum": "ชื้น",
+  "wx_wind": "ลม",
+  "wx_kmh": "กม./ชม.",
+  "wx_updated": "พยากรณ์อัปเดต",
+  "wx_hourly": "ราย ชม.",
+  "day_long_su": "อาทิตย์",
+  "day_long_mo": "จันทร์",
+  "day_long_tu": "อังคาร",
+  "day_long_we": "พุธ",
+  "day_long_th": "พฤหัส",
+  "day_long_fr": "ศุกร์",
+  "day_long_sa": "เสาร์"
 }

@@ -574,9 +574,11 @@ static void build_tab_display(lv_obj_t *page) {
   lv_obj_align(seg_lang, LV_ALIGN_RIGHT_MID, 0, 0);
 
   // Screensaver style
-  static const char *map_ss[4];
+  // Button index == stored style value, so Weather goes last rather than
+  // beside the other clocks — reordering would remap existing NVS settings.
+  static const char *map_ss[5];
   map_ss[0] = L(L_FLIP_CLOCK); map_ss[1] = L(L_MINIMAL);
-  map_ss[2] = L(L_SCREEN_OFF); map_ss[3] = "";
+  map_ss[2] = L(L_SCREEN_OFF); map_ss[3] = L(L_SS_WEATHER); map_ss[4] = "";
   lv_obj_t *row_ss = settings_row(page, L(L_SCREENSAVER));
   lv_obj_t *seg_ss = ui_create_segmented(
       row_ss, map_ss, SEG_CTRL_W, SEG_CTRL_H, screensaverStyle,

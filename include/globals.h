@@ -61,6 +61,33 @@ extern bool weatherValid;
 extern float weatherLat;
 extern float weatherLon;
 
+// Detail and daily forecast for the Weather screensaver, from the same
+// Open-Meteo request as weatherTemp. Written on Core 0 by fetchWeather(),
+// read on Core 1 — there is no lock: every field is written before
+// weatherGeneration is bumped, and the screensaver only re-reads when the
+// generation changes, so a torn read would need a fetch to land mid-render
+// and would cost one cosmetic frame until the next refresh.
+struct WeatherDay {
+  int  code;     // WMO weather code
+  int  hi, lo;   // °C, rounded
+  int  rainPct;  // max precipitation probability, -1 if not reported
+  int  wday;     // 0=Sunday
+};
+extern float weatherFeels;        // apparent temperature, °C
+extern int   weatherHumidity;     // relative humidity, %
+extern float weatherWind;         // wind speed, km/h
+extern WeatherDay weatherForecast[WEATHER_FORECAST_DAYS];
+extern int   weatherForecastDays; // valid entries in weatherForecast, 0 = none
+struct WeatherHour {
+  int  hour;     // 0–23, the forecast location's local time
+  int  temp;     // °C, rounded
+  int  rainPct;  // precipitation probability, -1 if not reported
+};
+extern WeatherHour weatherHourly[WEATHER_HOURLY_SLOTS]; // from the next full hour
+extern int   weatherHourlyCount;  // valid entries in weatherHourly, 0 = none
+extern char  weatherUpdatedAt[6]; // "HH:MM" of the last good fetch, local time
+extern volatile uint32_t weatherGeneration; // bumped after each good fetch
+
 // --- Air quality (Open-Meteo, same coordinates as the weather fetch) ---
 extern int  airQualityAqi;   // US AQI, 0-500
 extern bool airQualityValid;
@@ -76,7 +103,7 @@ extern int  homeLayoutStyle; // 0=Modern (weather+favs), 1=Classic (full-width g
 extern bool use24HourFormat;
 extern unsigned long lastTouchTime;
 extern bool screensaverActive;
-extern int screensaverStyle; // 0=Flip Clock, 1=Minimal, 2=Screen Off
+extern int screensaverStyle; // 0=Flip Clock, 1=Minimal, 2=Screen Off, 3=Weather
 extern unsigned long screensaverTimeoutMs; // user-configurable idle timeout
 extern volatile bool webActivityDetected; // set by web callbacks, consumed by main loop
 extern int gmtOffsetHours; // timezone offset in hours (e.g. 7 for GMT+7)

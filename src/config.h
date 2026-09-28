@@ -52,6 +52,8 @@
 // Screensaver idle timeout (ms)
 #define SCREENSAVER_TIMEOUT_MS 120000 // 2 minutes
 #define WEATHER_UPDATE_MS 1800000     // 30 minutes
+#define WEATHER_FORECAST_DAYS 5       // days in the forecast screensaver strip
+#define WEATHER_HOURLY_SLOTS  8       // hours in the screensaver's hourly strip
 #define STOCK_UPDATE_MS   300000      // 5 minutes (Twelve Data free tier: 8 req/min)
 #define STATUS_SYNC_ACTIVE_MS 30000   // 30 seconds re-subscribe for retained
 #define STATUS_SYNC_SAVER_MS 300000 // 5 minutes when not using (screensaver ON)
