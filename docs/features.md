@@ -41,6 +41,15 @@ Topic layout and payload formats: [MQTT](mqtt.md).
 - **Flip Clock** — Premium glass-morphism panels (HH:MM), warm amber accents, pulsing animated colon, weather + color-coded WiFi/MQTT status bar, panel title display
 - **Minimal** — Clean centered HH:MM with amber accent underline, date, weather, and status
 - **Screen Off** — Pure black, wake-on-touch
+- **Weather** ("Sky" / "อากาศ" in Settings) — Clock and date beside today's
+  conditions (icon, temperature, high/low, condition, place, feels-like /
+  humidity / wind), an hourly strip for the next 8 hours (temperature and a
+  rain-chance bar), and 5-day forecast cards (day, icon, high/low, chance of
+  rain). Rain chances ≥ 60 % are shown in blue. The top row shows WiFi/MQTT
+  status and when the forecast was fetched. Icons and the ↑/↓ arrows are drawn
+  from flat shapes, not a font. Labels on this screen use font copies that
+  lift Thai tone marks above upper vowels (LVGL 8 does no shaping). Stored as
+  `ss_style = 3`.
 - Configurable idle timeout (default 2 minutes)
 - Auto-dim to 80/255 brightness, restore on wake
 - Re-subscribes MQTT on wake for state sync
@@ -52,6 +61,9 @@ The Flip Clock style also carries the stock ticker bar — see
 
 - Open-Meteo API (free, no key required)
 - City name geocoding → lat/lon → current temperature + description
+- The same request returns feels-like, humidity, wind, the next hours
+  (`WEATHER_HOURLY_SLOTS`) and a 5-day daily forecast (`WEATHER_FORECAST_DAYS`,
+  `timezone=auto`) for the Weather screensaver
 - WMO weather code mapping (Clear, Cloudy, Rain, Snow, etc.)
 - 30-minute update interval
 - Fallback: Bangkok, Thailand

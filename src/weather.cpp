@@ -25,6 +25,16 @@ const char *wmoToDesc(int code) {
   return L(L_WX_STORM);
 }
 
+// Day of week for a Gregorian date, 0=Sunday (Sakamoto). The forecast dates
+// are the location's own calendar days, so they are labelled from the date
+// Open-Meteo returns rather than from the panel clock's GMT offset.
+static int dayOfWeek(int y, int m, int d) {
+  static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+  if (m < 1 || m > 12) return 0;
+  if (m < 3) y -= 1;
+  return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
+}
+
 // Geocoding cache — avoids re-resolving same city every update
 static float cached_lat = 0;
 static float cached_lon = 0;
@@ -106,10 +116,21 @@ void fetchWeather() {
     }
   }
 
-  // 2. Weather forecast via lat/lon
+  // 2. Current conditions + hourly + daily forecast via lat/lon, in one
+  // request. timezone=auto makes daily[0] "today" at the forecast location,
+  // which is what the Weather screensaver labels it. forecast_hours starts at
+  // the current hour, which the strip skips, so ask for two more than it
+  // shows. The whole response is ~2 KB.
   String weatherUrl =
       "http://api.open-meteo.com/v1/forecast?latitude=" + String(lat, 4) +
-      "&longitude=" + String(lon, 4) + "&current_weather=true";
+      "&longitude=" + String(lon, 4) +
+      "&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
+      "weather_code,wind_speed_10m"
+      "&hourly=temperature_2m,precipitation_probability"
+      "&forecast_hours=" + String(WEATHER_HOURLY_SLOTS + 2) +
+      "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
+      "precipitation_probability_max"
+      "&forecast_days=" + String(WEATHER_FORECAST_DAYS) + "&timezone=auto";
 
   Serial.printf("[WEATHER] Fetching: %s\n", weatherUrl.c_str());
   http.setTimeout(HTTP_TIMEOUT_MS);
@@ -123,12 +144,60 @@ void fetchWeather() {
   if (weatherHttpCode == 200) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, http.getString());
-    if (!err) {
-      weatherTemp = doc["current_weather"]["temperature"].as<float>();
-      weatherCode = doc["current_weather"]["weathercode"].as<int>();
+    if (!err && doc["current"]["temperature_2m"].is<float>()) {
+      JsonObject cur = doc["current"];
+      weatherTemp = cur["temperature_2m"].as<float>();
+      weatherCode = cur["weather_code"] | 0;
+      weatherFeels = cur["apparent_temperature"] | weatherTemp;
+      weatherHumidity = cur["relative_humidity_2m"] | 0;
+      weatherWind = cur["wind_speed_10m"] | 0.0f;
+
+      JsonObject daily = doc["daily"];
+      JsonArray days = daily["time"];
+      int n = 0;
+      for (int i = 0; i < (int)days.size() && n < WEATHER_FORECAST_DAYS; i++) {
+        int y, m, d;
+        const char *iso = days[i] | "";
+        if (sscanf(iso, "%d-%d-%d", &y, &m, &d) != 3) continue;
+        WeatherDay &w = weatherForecast[n++];
+        w.code = daily["weather_code"][i] | 0;
+        w.hi = (int)lroundf(daily["temperature_2m_max"][i] | 0.0f);
+        w.lo = (int)lroundf(daily["temperature_2m_min"][i] | 0.0f);
+        // null for a day the model has no precipitation figure for
+        w.rainPct = daily["precipitation_probability_max"][i].is<int>()
+                        ? daily["precipitation_probability_max"][i].as<int>()
+                        : -1;
+        w.wday = dayOfWeek(y, m, d);
+      }
+      weatherForecastDays = n;
+
+      // Hourly, from the first full hour after "now". Both timestamps are the
+      // location's local time in the same "YYYY-MM-DDTHH:MM" form, so a string
+      // compare orders them without involving the panel's own GMT offset.
+      const char *nowIso = cur["time"] | "";
+      JsonObject hourly = doc["hourly"];
+      JsonArray hours = hourly["time"];
+      int h = 0;
+      for (int i = 0; i < (int)hours.size() && h < WEATHER_HOURLY_SLOTS; i++) {
+        const char *iso = hours[i] | "";
+        if (strlen(iso) < 16 || strcmp(iso, nowIso) <= 0) continue;
+        WeatherHour &w = weatherHourly[h++];
+        w.hour = atoi(iso + 11);
+        w.temp = (int)lroundf(hourly["temperature_2m"][i] | 0.0f);
+        w.rainPct = hourly["precipitation_probability"][i].is<int>()
+                        ? hourly["precipitation_probability"][i].as<int>()
+                        : -1;
+      }
+      weatherHourlyCount = h;
+
+      struct tm now;
+      if (getLocalTime(&now, 0))
+        strftime(weatherUpdatedAt, sizeof(weatherUpdatedAt), "%H:%M", &now);
+
       weatherValid = true;
-      Serial.printf("[WEATHER] %s %.1fC, %s\n", weatherCityName, weatherTemp,
-                    wmoToDesc(weatherCode));
+      weatherGeneration = weatherGeneration + 1; // last — see the note on WeatherDay in globals.h
+      Serial.printf("[WEATHER] %s %.1fC, %s, %d-day forecast\n",
+                    weatherCityName, weatherTemp, wmoToDesc(weatherCode), n);
     } else {
       Serial.printf("[WEATHER] JSON error: %s\n", err.c_str());
       weatherValid = false;

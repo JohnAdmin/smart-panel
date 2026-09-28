@@ -159,6 +159,16 @@ enum LangKey : uint8_t {
   // --- Screensaver ---
   L_SMART_HOME,
   L_TAP_TO_WAKE,
+  L_SS_WEATHER,   // settings segment label for the Weather screensaver
+  L_TODAY,
+  L_WX_FEELS,
+  L_WX_HUM,
+  L_WX_WIND,
+  L_WX_KMH,
+  L_WX_UPDATED,
+  L_WX_HOURLY,
+  // Full day names, for the forecast cards (L_DAY_* are two-letter chips)
+  L_DAYL_SU, L_DAYL_MO, L_DAYL_TU, L_DAYL_WE, L_DAYL_TH, L_DAYL_FR, L_DAYL_SA,
 
   // --- UI General ---
   L_ICON_NAMES,

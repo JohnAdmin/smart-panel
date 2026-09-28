@@ -175,6 +175,19 @@ static const char *defaults[LANG_KEY_COUNT] = {
   // --- Screensaver ---
   [L_SMART_HOME]    = "SMART HOME",
   [L_TAP_TO_WAKE]   = "Tap to unlock",
+  // "Sky" rather than "Weather": four options share the 168 px segmented
+  // control, which leaves each ~39 px — "Weather" doesn't fit at 12 px.
+  [L_SS_WEATHER]    = "Sky",
+  [L_TODAY]         = "Today",
+  [L_WX_FEELS]      = "Feels",
+  [L_WX_HUM]        = "RH",
+  [L_WX_WIND]       = "Wind",
+  [L_WX_KMH]        = "km/h",
+  [L_WX_UPDATED]    = "Updated",
+  [L_WX_HOURLY]     = "Hourly",
+  [L_DAYL_SU] = "Sunday", [L_DAYL_MO] = "Monday", [L_DAYL_TU] = "Tuesday",
+  [L_DAYL_WE] = "Wednesday", [L_DAYL_TH] = "Thursday", [L_DAYL_FR] = "Friday",
+  [L_DAYL_SA] = "Saturday",
 
   // --- UI General ---
   [L_ICON_NAMES]    = "Lamp\nFan\nSwitch\nPlug\nThermostat\nLock\nTV\nGarage\nLight Strip\nGeneric",
@@ -293,6 +306,12 @@ static const char *key_names[LANG_KEY_COUNT] = {
   [L_AQI_MODERATE]="aqi_moderate", [L_AQI_SENSITIVE]="aqi_sensitive",
   [L_AQI_UNHEALTHY]="aqi_unhealthy", [L_AQI_HAZARDOUS]="aqi_hazardous",
   [L_SMART_HOME]="smart_home", [L_TAP_TO_WAKE]="tap_to_wake",
+  [L_SS_WEATHER]="ss_weather", [L_TODAY]="today", [L_WX_FEELS]="wx_feels",
+  [L_WX_HUM]="wx_hum", [L_WX_WIND]="wx_wind", [L_WX_KMH]="wx_kmh",
+  [L_WX_UPDATED]="wx_updated", [L_WX_HOURLY]="wx_hourly",
+  [L_DAYL_SU]="day_long_su", [L_DAYL_MO]="day_long_mo", [L_DAYL_TU]="day_long_tu",
+  [L_DAYL_WE]="day_long_we", [L_DAYL_TH]="day_long_th", [L_DAYL_FR]="day_long_fr",
+  [L_DAYL_SA]="day_long_sa",
   [L_ICON_NAMES]="icon_names",
 
   [L_WEB_TITLE]="web_title", [L_WEB_SAVE_RESTART]="web_save_restart",
@@ -317,7 +336,9 @@ static const char *key_names[LANG_KEY_COUNT] = {
 // Dynamic string buffer for JSON-loaded strings (in PSRAM if available)
 static char *_strPool = nullptr;
 static size_t _strPoolUsed = 0;
-#define STR_POOL_SIZE 4096
+// Thai alone is ~7.5 KB of UTF-8 values; at the old 4 KB every key past the
+// fill point silently fell back to English. PSRAM-backed, so size generously.
+#define STR_POOL_SIZE 12288
 
 static char *pool_alloc(const char *src) {
   if (!_strPool) {
